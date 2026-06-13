@@ -1,0 +1,12 @@
+[package]
+name = "keel-contracts"
+description = "KEEL L0 — the frozen joints: core types + the ten contracts (the genome's load-bearing surface)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+futures-core = "0.3"

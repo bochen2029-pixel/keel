@@ -1,0 +1,11 @@
+# KEEL workspace. The genome's Rust implementation.
+# L0 (keel-contracts) is frozen first; kernel / adapters / middleware / services / apps land in Stage 0+.
+[workspace]
+resolver = "2"
+members = ["crates/keel-contracts"]
+
+[workspace.package]
+edition = "2021"
+version = "0.2.0"
+license = "MIT"
+authors = ["Bo Chen"]

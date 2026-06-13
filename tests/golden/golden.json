@@ -1,0 +1,41 @@
+{
+  "_meta": {
+    "status": "RATIFIED + FROZEN by operator 2026-06-13 — agent-frozen henceforth (I5). Hash in .frozen.json; changing any case is an operator action only.",
+    "purpose": "The language-neutral conformance layer (canon §7). ANY KEEL implementation, in ANY language, must pass these. This is what makes the implementation language the most reversible decision in the system (ADR #5).",
+    "freeze": "Verified by re-hashing `cases` (every section except _meta), canonical-sorted, vs .frozen.json. The Stage-0 CI gate enforces it.",
+    "version": "0.2.0"
+  },
+  "router": [
+    { "name": "file-read scaffolding -> local",        "input": {"kind": "scaffolding", "ty": "tool_call:read_file", "tier_history": []}, "expect": {"tier": "local"} },
+    { "name": "multi-constraint reasoning -> cheap",    "input": {"kind": "core-wire", "ty": "reason:multi_constraint", "tier_history": []}, "expect": {"tier": "cheap-API"} },
+    { "name": "local failed oracle twice -> escalate",  "input": {"kind": "scaffolding", "ty": "transform", "tier_history": ["local", "local"], "oracle_failures": 2}, "expect": {"tier_in": ["cheap-API", "frontier"]} },
+    { "name": "sovereign data forces local",            "input": {"kind": "core-wire", "ty": "reason:multi_constraint", "data_class": "sovereign"}, "expect": {"tier": "local", "reason_contains": "privacy"} },
+    { "name": "image content forces local",             "input": {"kind": "core-wire", "content": ["image"]}, "expect": {"tier": "local", "reason_contains": "perception"} },
+    { "name": "projected cost over budget -> BLOCK",    "input": {"kind": "core-wire", "projected_cost": 9.99, "budget_remaining": 1.00}, "expect": {"tier": "BLOCK", "reason_contains": "budget"} }
+  ],
+  "model_tier": [
+    { "name": "cost from usage + price (deepseek-v4-pro)", "input": {"usage": {"input_tokens": 1000, "output_tokens": 500, "cache_hit_tokens": 800}, "price": {"input_miss": 0.435, "input_hit": 0.003625, "output": 0.87}}, "expect": {"cost": 0.0005249, "tol": 1e-6} },
+    { "name": "tool call valid against schema under constrained decode", "input": {"schema": {"type": "object", "required": ["path"], "properties": {"path": {"type": "string"}}}}, "expect": {"tool_call_valid_against_schema": true} },
+    { "name": "reasoning_content survives a tool round-trip (no 400)", "input": {"two_turn_thinking": true}, "expect": {"reasoning_content_preserved": true, "no_400": true} }
+  ],
+  "oracle": [
+    { "name": "redaction output with an SSN pattern fails a property oracle", "input": {"output": "patient ... 123-45-6789 ...", "property": "no_ssn_pattern"}, "expect": {"passed": false, "joint_wrong": false} },
+    { "name": "code passing its own tests but failing a golden is JOINT_WRONG", "input": {"self_tests_pass": true, "golden_violated": true}, "expect": {"passed": false, "joint_wrong": true} },
+    { "name": "claim not traceable to canon -> INSUFFICIENT_SOURCE (routes to human)", "input": {"claim": "led a team of 12", "canon_supports": false}, "expect": {"passed": false, "reason_contains": "INSUFFICIENT_SOURCE"} }
+  ],
+  "perception": [
+    { "name": "identical frame is change-gated (dHash <= 4)", "input": {"frame_delta": 2}, "expect": {"emitted": false} },
+    { "name": "slide change emits a percept (dHash >= 15)",   "input": {"frame_delta": 18}, "expect": {"emitted": true} },
+    { "name": "silence is VAD-gated",                          "input": {"voiced_ms": 0}, "expect": {"emitted": false} }
+  ],
+  "recall": [
+    { "name": "reranker beats identity on recall@k",          "input": {"query": "...", "expected_memory_ids": ["m7"]}, "expect": {"recall_at_5_uplift_over_identity": ">= threshold"} },
+    { "name": "embedder upgrade beats the MiniLM floor",       "input": {"set": "golden-recall"}, "expect": {"ndcg_uplift_over_floor": ">= threshold"} },
+    { "name": "index fingerprint mismatch rebuilds from ledger", "input": {"index_embedder": "minilm-384", "resolved_embedder": "qwen3-embedding-1024"}, "expect": {"serve": false, "rebuild_from_ledger": true} }
+  ],
+  "privacy": [
+    { "name": "operator key caught deterministically (no model)", "input": {"text": "...sk-abc123..."}, "expect": {"redacted": true, "by": "rung2_regex"} },
+    { "name": "third-party name in context the model adds over deterministic", "input": {"text": "...met Dana at..."}, "expect": {"model_adds_span": true} },
+    { "name": "secret never reaches the distill corpus",       "input": {"trace_contains_secret": true}, "expect": {"distill_feedstock": false} }
+  ]
+}

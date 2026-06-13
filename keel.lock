@@ -1,0 +1,85 @@
+# keel.lock — the reproducible substrate KEEL expects.
+# Pin hashes when the models/servers are installed. The substrate resolver (kernel::lifecycle)
+# reads this to discover/launch/route; a fresh box is provisioned from it. Hashes are the
+# reproducibility contract — a run is replayable only against pinned weights.
+
+keel:        { version: 0.2.0, stage: spec }   # spec -> stage0 -> stage1 -> stage2 -> stage3
+
+# --- canonical primitives ---------------------------------------------------
+# disposition: `embedded` = baked into the binary; `shared` = system asset, download-once.
+substrate:
+  llm_vision:                                   # brain + eyes (native multimodal, early-fusion)
+    id: qwen3.5-9b-q5_k_m
+    mmproj: mmproj-F16                           # llama.cpp serves Qwen vision via this projector file
+    sha256: TODO
+    mmproj_sha256: TODO
+    disposition: shared
+    fallbacks: [qwen3.5-4b-q4_k_m]               # smaller-VRAM tier (resolver picks by HardwareProfile)
+  audio:                                         # ears (separate organ; transcribes -> text pre-cognition)
+    id: whisper-large-v3-turbo
+    sha256: TODO
+    disposition: shared
+    fallback: whisper-base.en                    # faster-than-realtime CPU default
+    gate: vad                                    # transcribe only on voiced audio
+  embedding:                                     # recall + cheap routing-classification — a Memory organ, NOT a tier
+    id: qwen3-embedding-0.6b-q8                    # capable local default (~1024-dim, sovereign-safe)
+    sha256: TODO
+    dim: 1024                                      # fingerprinted into the index; mismatch => rebuild-from-ledger
+    disposition: shared                            # download-once system asset
+    fallback: all-minilm-l6-v2                     # 384-dim, embedded, CPU -> the "never blind" floor
+    sovereign_forces: local                        # I3: sovereign/PHI text never embeds off-box; vectors stay local
+    format_committing: true                        # the one substrate exception to tier-interchangeability (ADR #13)
+  rerank:                                          # cross-encoder upgrade to Memory's rerank() sub-seam
+    id: qwen3-reranker-0.6b-q8
+    sha256: TODO
+    disposition: shared
+    default: identity                              # SHIPS OFF (canon §11) — pass-through until GOLDEN_RECALL earns it on
+  privacy:                                         # I3 mask, rung 3 — recall verification-pass (NOT the guarantee)
+    id: openai-privacy-filter                      # bidirectional token-classifier (BIOES span head), 50M active / ~1.5B total, Apache-2.0
+    sha256: TODO
+    runtime: onnx                                  # in-process via the Rust `ort` crate (or transformers) — NOT a GGUF, NOT llama.cpp, no server to supervise
+    disposition: shared                            # ~1GB weights, download-once (too big to bake in); but runs in-process like the embedder, unlike the server-based LLM/Whisper
+    decode: viterbi                                # span-decode is deterministic, app-level, KEEL-owned -> the operating point is a NON-model knob
+    default: off                                   # rungs 1-2 (markers+regex) ship Stage 0; model lands Stage 2 behind GOLDEN_PRIVACY
+    operating_point: recall                        # = the Viterbi transition-bias: tune toward over-redaction; leak-uncertain => sovereign
+    per_cell_finetune: true                        # general PII | medical PHI | code/secrets
+    scrub_before_distill: true                     # reversibility gate: no secret fossilized into a LoRA
+  store:                                         # the index (the ledger is files, see below)
+    engine: sqlite                               # baked into the binary (~1 MB, embeddable)
+    vector: sqlite-vec
+    disposition: embedded
+
+# --- inference servers (resolver targets) -----------------------------------
+servers:
+  llama_cpp: { path: "C:\\llama.cpp", endpoint: "http://127.0.0.1:8080", launch: managed }
+  whisper:   { path: "C:\\whisper.cpp", mode: "cli|server" }
+  models_dir: "C:\\models"
+
+# the substrate resolver tries these in order (use-whatever-exists, then launch, then cloud)
+resolver_order:
+  - probe_running:  ["http://127.0.0.1:1234/v1", "http://127.0.0.1:11434/v1", "http://127.0.0.1:8080/v1"]  # LM Studio / Ollama / llama-server
+  - launch_local:   [llama_cpp, whisper]
+  - cloud_tier:     [cheap-API, frontier]
+  - embedded_tiny:  [embedding]                  # recall + cheap classification floor (a Memory organ, not a degraded cognition tier)
+  - else:           fail   # SUBSTRATE_UNRESOLVED
+
+# --- tiers (the routing economy) --------------------------------------------
+# price is $/1M tokens (miss / hit / out); local is electricity, tracked as $0.
+tiers:
+  local:     { adapter: local_llama, model: qwen3.5-9b-q5_k_m, vision: true, price: { miss: 0.0,   hit: 0.0,      out: 0.0  }, default_effort: { n: 8 } }
+  cheap-API: { adapter: deepseek,    model: deepseek-v4-pro,   vision: false, api_key_env: DEEPSEEK_API_KEY, price: { miss: 0.435, hit: 0.003625, out: 0.87 }, default_effort: { n: 2, thinking: high } }
+  frontier:  { adapter: anthropic,   model: claude-opus-4-8,   vision: true,  api_key_env: ANTHROPIC_API_KEY, price: { miss: 5.0,   hit: 0.5,      out: 25.0 }, default_effort: { n: 1 } }
+
+router:
+  default_tier: local
+  sovereign_forces: local
+  perception_forces: local        # raw frames/audio never egress (I3)
+  escalate_after_oracle_failures: 2
+
+# --- persistence ------------------------------------------------------------
+ledger:    { kind: files, dir: ".\\.keelstate", audit: "audit.jsonl", tape: "tape/", traces: "traces/" }   # append-only, lossless, human-readable = system of record
+index:     { kind: sqlite, file: ".\\.keelstate\\index.db", derived: true, rebuildable_from: ledger }       # queryable, disposable
+
+# --- invariants (pins for the freeze check) ---------------------------------
+golden:     { set_sha256: TODO }   # agent-frozen ground truth; operator-only --update
+thresholds: { rework_rate_max: 0.10, cache_hit_min: 0.70, escalation_rate: downward_trend }

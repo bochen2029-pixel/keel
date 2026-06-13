@@ -1,0 +1,9 @@
+# Rust build artifacts
+/target
+**/*.rs.bk
+
+# KEEL run-state (the ledger lives here at runtime; never committed)
+/.keelstate/
+
+# editor / OS cruft
+.DS_Store
