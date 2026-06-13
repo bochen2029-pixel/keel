@@ -1,0 +1,14 @@
+[package]
+name = "keel-middleware"
+description = "KEEL L3 — invariant middleware (I1 audit · I3 privacy · I4 cost) on the kernel chain."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+keel-contracts = { path = "../keel-contracts" }
+async-trait = "0.1"
+
+[dev-dependencies]
+keel-kernel = { path = "../keel-kernel" }
+tokio = { version = "1", features = ["rt", "macros"] }

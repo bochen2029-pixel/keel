@@ -2,7 +2,7 @@
 # L0 (keel-contracts) is frozen first; kernel / adapters / middleware / services / apps land in Stage 0+.
 [workspace]
 resolver = "2"
-members = ["crates/keel-contracts", "crates/keel-kernel"]
+members = ["crates/keel-contracts", "crates/keel-kernel", "crates/keel-middleware"]
 
 [workspace.package]
 edition = "2021"
