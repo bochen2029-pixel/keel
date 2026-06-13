@@ -14,6 +14,7 @@ The conversation summary is **lossy**. The committed repo + the canon are the tr
 - **KEEL** = the sovereign genome harness. Canon **v0.2 adopted**. **Native Rust core** (ADR #5). Consumed **embedded or over protocol**. L1 personal tool, not a product.
 - **Committed `d83d6ac` on `main`; pushed PUBLIC to `github.com/bochen2029-pixel/keel`.**
 - **L0 contracts** (`crates/keel-contracts`): the ten joints + types + §18 error taxonomy. **`cargo check` + `cargo clippy` GREEN** on rustc **1.96.0**.
+- **L1 kernel spine — slice 1 landed** (`crates/keel-kernel`): `manifest` (YAML; parses the real `keel.lock` → typed tiers/router/cost, reuses L0 `Price`/`Effort`/`Capabilities`) · `context` (trace-id + clock + per-task budget; L0 stays clock-free) · `registry` (tier→`Arc<dyn ModelTier>` container the **wiring layer** fills, so the kernel imports no L2 — a deliberate fix over the bench). `check` + `clippy` clean, **8 tests green**. Manifest format decided = YAML behind serde (swappable); `rust-toolchain.toml` pin deferred (charter §5: a global-toolchain touch).
 - **Golden cases**: ratified + **FROZEN** (`tests/golden/golden.json` + `.frozen.json`, 21 cases / 6 sections). Language-neutral conformance; **agent read-only**.
 - Docs: `CLAUDE.md` (build constitution), `AUTONOMY_CHARTER.md`, `README.md`, `keel.lock`.
 - **Reference bench**: Marrow-L1 (Python, green, golden-tested) at `C:\loom\marrow-l1` — diff the Rust core against it + the goldens (the ASTRA-textverse pattern). Don't port its code.
@@ -21,7 +22,7 @@ The conversation summary is **lossy**. The committed repo + the canon are the tr
 - Toolchain: rustc **1.96.0** (a stuck 1.95→1.96 rustup update was completed during setup; `rust-std` re-fetched). **Build from PowerShell/MSVC env, not git-bash.**
 
 ## Next — Stage 0 (the spine). Do NOT build it all at once; contract-first, golden/bench-gated.
-- **kernel**: manifest · context · registry · middleware chain · lifecycle + substrate-resolver · engine · lock
+- **kernel**: ~~manifest · context · registry~~ (slice 1 ✓) → **middleware chain** · lifecycle + substrate-resolver · engine · lock
 - **one local adapter** (HTTP → llama-server)
 - **invariant middleware**: audit (I1) · privacy rungs 1–2 deterministic (I3) · cost (I4)
 - **file ledger** (I2) + **SQLite store** (the index)

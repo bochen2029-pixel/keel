@@ -1,0 +1,15 @@
+[package]
+name = "keel-kernel"
+description = "KEEL L1 — the spine: manifest (config→behavior) · context · registry. Imports only L0."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+keel-contracts = { path = "../keel-contracts" }
+serde = { version = "1", features = ["derive"] }
+serde_yaml_ng = "0.10"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+async-trait = "0.1"
