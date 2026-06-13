@@ -3,7 +3,7 @@
 # reads this to discover/launch/route; a fresh box is provisioned from it. Hashes are the
 # reproducibility contract — a run is replayable only against pinned weights.
 
-keel:        { version: 0.2.0, stage: spec }   # spec -> stage0 -> stage1 -> stage2 -> stage3
+keel:        { version: 0.2.0, stage: stage0 }   # spec -> stage0 -> stage1 -> stage2 -> stage3
 
 # --- canonical primitives ---------------------------------------------------
 # disposition: `embedded` = baked into the binary; `shared` = system asset, download-once.
@@ -51,7 +51,9 @@ substrate:
 
 # --- inference servers (resolver targets) -----------------------------------
 servers:
-  llama_cpp: { path: "C:\\llama.cpp", endpoint: "http://127.0.0.1:8080", launch: managed }
+  llama_cpp: { path: "C:\\llama.cpp", build: b9627, cuda: "12.4", endpoint: "http://127.0.0.1:8080", launch: managed, prev_build: "C:\\llama.cpp-b8931-april" }
+  # ^ updated b8931 -> b9627 on 2026-06-13 (side-by-side; prev build reversible). Validated on Qwen3.5-9B-Q5_K_M: text + reasoning_content + thinking-toggle + vision(mmproj-F16).
+  #   Qwen3.5-9B native ctx = 262144 (256K). Plan: KV q8_0 + flash-attn for context headroom (the update's purpose) — validate at managed launch. TurboQuant KV (Google, ICLR'26) NOT in upstream (PR closed 2026-06-03); watch-item, not adopted.
   whisper:   { path: "C:\\whisper.cpp", mode: "cli|server" }
   models_dir: "C:\\models"
 
