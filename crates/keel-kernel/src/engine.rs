@@ -16,7 +16,7 @@
 //! **I5 teeth (canon §8/§10):** the loop resolves `step.golden_refs` against the injected registry
 //! and verifies against the resolved cases. Two guards keep "vacuous on a plain chat turn" *safe*:
 //! (a) an **unresolved** `golden_ref` → **fail-closed** (a named-but-missing assertion is a hole,
-//! never a vacuous pass); (b) a **`critical`** step with **no effective assertion** (empty verdict
+//! never a vacuous pass); (b) a **`critical`** step with **no correctness assertion** (the I3 baseline excluded; empty verdict
 //! evidence) → **config fault**, never a silent pass. A non-critical, no-ref turn still passes
 //! silently — the teeth bite on critical/ref'd work, not on plain chat.
 //!
@@ -53,6 +53,12 @@ pub struct EngineConfig {
     pub slots: BTreeMap<String, TierSlot>,
     pub router: Box<dyn Router>,
     pub oracle: Arc<dyn Oracle>,
+    /// The **I3 sovereignty baseline** (currently no-SSN-on-output): an always-on check that runs and
+    /// folds into the verdict but is **excluded from the critical-step guard (#3)** — a privacy
+    /// baseline is not a correctness oracle. **STOPGAP:** `mw::privacy` masks only on *egress* (cloud),
+    /// so a LOCAL turn's output PII is otherwise unguarded; this covers that gap until the Stage-2
+    /// privacy rung re-homes it as an output-side I3 check (then this slot is dropped). Never satisfies #3.
+    pub baseline: Option<Arc<dyn Oracle>>,
     pub spine: Arc<dyn Spine>,
     pub memory: Option<Arc<dyn Memory>>,
     pub trace_sink: Option<Arc<dyn TraceSink>>,
@@ -85,6 +91,7 @@ pub struct Engine {
     slots: BTreeMap<String, TierSlot>,
     router: Box<dyn Router>,
     oracle: Arc<dyn Oracle>,
+    baseline: Option<Arc<dyn Oracle>>,
     spine: Arc<dyn Spine>,
     memory: Option<Arc<dyn Memory>>,
     trace_sink: Option<Arc<dyn TraceSink>>,
@@ -103,8 +110,8 @@ impl Engine {
                 "engine: no tier wired (local substrate down and no cloud keys)".into(),
             ));
         }
-        let EngineConfig { slots, router, oracle, spine, memory, trace_sink, default_tier, goldens } = config;
-        Ok(Engine { slots, router, oracle, spine, memory, trace_sink, default_tier, goldens })
+        let EngineConfig { slots, router, oracle, baseline, spine, memory, trace_sink, default_tier, goldens } = config;
+        Ok(Engine { slots, router, oracle, baseline, spine, memory, trace_sink, default_tier, goldens })
     }
 
     /// The tiers actually wired (sorted).
@@ -170,27 +177,41 @@ impl Engine {
             }
         }
 
-        // (6) verify (I5) against the resolved cases — a non-model assertion.
+        // (6) verify (I5). The injected `oracle` is the CORRECTNESS surface (the golden-ref dispatch +
+        //     a cell's domain oracles); ITS evidence is what satisfies the critical-step guard (#3).
         let output = StepOutput { content: result.content.clone(), artifact: Value::Null };
         let mut verdict = self.oracle.verify(&output, &golden_cases, ctx).await?;
+        // capture BEFORE folding the baseline: only a CORRECTNESS assertion counts for #3.
+        let correctness_asserted = !verdict.evidence.is_empty();
 
-        // (6a) fail-closed on any unresolved golden_ref (hardening): a named-but-missing assertion is
-        //      a hole, surfaced to the operator — never a vacuous pass.
+        // (6a) the I3 sovereignty baseline (no-SSN-on-output) runs always and folds into the verdict —
+        //      but it is a privacy check, NOT a correctness oracle, so it is **excluded** from #3.
+        if let Some(baseline) = &self.baseline {
+            let bv = baseline.verify(&output, &[], ctx).await?;
+            verdict.passed &= bv.passed;
+            verdict.joint_wrong |= bv.joint_wrong;
+            verdict.failures.extend(bv.failures);
+            verdict.evidence.extend(bv.evidence);
+        }
+
+        // (6b) fail-closed on any unresolved golden_ref (a named-but-missing assertion is a hole).
+        //      ASCII-only: this line lands in the verdict, the checkpoint, and the ledger — the I5
+        //      alarm must render on any console/codepage, not just a UTF-8 shell.
         if !missing.is_empty() {
             verdict.passed = false;
-            let detail = format!("unresolved golden_ref(s) {missing:?} — missing assertion, fail-closed (→ operator)");
+            let detail = format!("unresolved golden_ref(s) {missing:?} - missing assertion, fail-closed (-> operator)");
             verdict.failures.push(detail.clone());
             verdict.evidence.push(Assertion { kind: "golden_ref".into(), detail });
         }
 
-        // (6b) a CRITICAL step with no effective assertion is a config fault, not a vacuous pass
-        //      (canon §8/§10). `verdict.evidence` is empty exactly when no oracle applied to this step
-        //      (an empty registry, or a non-empty one where none was applicable) — for a critical step
-        //      that is a hole, never a pass. (A non-critical no-ref turn still passes silently.)
-        if step.critical && verdict.evidence.is_empty() {
+        // (6c) a CRITICAL step needs a CORRECTNESS assertion — a resolved golden_ref that fired, or a
+        //      domain oracle — **not** the I3 baseline. None ⇒ config fault, never a vacuous pass
+        //      (canon 8/10). Resolving a ref is not asserting one: a ref to a conformance-only golden
+        //      produces no correctness evidence and lands here too.
+        if step.critical && !correctness_asserted {
             verdict.passed = false;
             let detail =
-                "critical step with no applicable oracle — config fault (canon §8/§10), not a vacuous pass".to_string();
+                "critical step with no applicable correctness oracle - config fault (canon 8/10), not a vacuous pass".to_string();
             verdict.failures.push(detail.clone());
             verdict.evidence.push(Assertion { kind: "critical".into(), detail });
         }
@@ -419,6 +440,7 @@ mod tests {
             slots,
             router,
             oracle,
+            baseline: None,
             spine,
             memory,
             trace_sink,
@@ -593,6 +615,7 @@ mod tests {
             slots: one_local(echo(0.0)),
             router: Box::new(FixedRouter("local")),
             oracle: Arc::new(EvidenceOracle),
+            baseline: None,
             spine: Arc::new(RecSpine::default()),
             memory: None,
             trace_sink: None,
@@ -657,5 +680,73 @@ mod tests {
         let out = engine.run(&mut s, &mut ctx(), req()).await.unwrap();
         assert!(out.verdict.passed, "plain non-critical no-ref turn passes silently");
         assert!(out.verdict.failures.is_empty(), "no false alarm on a plain turn");
+    }
+
+    #[tokio::test]
+    async fn baseline_does_not_satisfy_critical_step() {
+        // the un-neutering: a critical step with NO golden_ref, where ONLY the I3 baseline asserts,
+        // must still config-fault — a privacy baseline is not a correctness oracle.
+        let engine = Engine::new(EngineConfig {
+            slots: one_local(echo(0.0)),
+            router: Box::new(FixedRouter("local")),
+            oracle: Arc::new(PassOracle),             // correctness: no evidence
+            baseline: Some(Arc::new(EvidenceOracle)), // baseline: asserts — but must NOT count for #3
+            spine: Arc::new(RecSpine::default()),
+            memory: None,
+            trace_sink: None,
+            default_tier: "local".into(),
+            goldens: HashMap::new(),
+        })
+        .unwrap();
+        let mut s = step();
+        s.critical = true;
+        let out = engine.run(&mut s, &mut ctx(), req()).await.unwrap();
+        assert!(!out.verdict.passed, "the baseline must not satisfy a critical step's #3");
+        assert!(out.verdict.failures.iter().any(|f| f.contains("config fault")));
+    }
+
+    #[tokio::test]
+    async fn critical_resolved_ref_with_no_assertion_config_faults() {
+        // resolving a ref is not asserting one: a critical step names a golden that RESOLVES, but the
+        // correctness oracle produces no evidence for it (as GoldenDispatchOracle does for a
+        // conformance-only family) → #3 config-faults, not a vacuous pass, and not the #2 path.
+        let mut goldens = HashMap::new();
+        goldens.insert("conf-only".to_string(), GoldenCase { name: "conf-only".into(), input: json!({ "usage": {} }), expect: json!({}) });
+        let engine = Engine::new(EngineConfig {
+            slots: one_local(echo(0.0)),
+            router: Box::new(FixedRouter("local")),
+            oracle: Arc::new(PassOracle), // mimics the dispatch skipping a conformance-only case: no evidence
+            baseline: None,
+            spine: Arc::new(RecSpine::default()),
+            memory: None,
+            trace_sink: None,
+            default_tier: "local".into(),
+            goldens,
+        })
+        .unwrap();
+        let mut s = step();
+        s.critical = true;
+        s.golden_refs = vec!["conf-only".into()]; // resolves (no #2), but yields no correctness assertion
+        let out = engine.run(&mut s, &mut ctx(), req()).await.unwrap();
+        assert!(!out.verdict.passed, "resolved-but-unasserted ref on a critical step config-faults");
+        assert!(out.verdict.failures.iter().any(|f| f.contains("config fault")));
+        assert!(!out.verdict.failures.iter().any(|f| f.contains("unresolved golden_ref")), "the ref resolved — not the #2 path");
+    }
+
+    #[tokio::test]
+    async fn the_failure_alarm_is_ascii() {
+        // the I5 alarm lands in the verdict, the checkpoint, and the ledger — it must render on any
+        // console/codepage. Drive both engine-authored failure paths and assert the strings are ASCII.
+        let engine = engine_with(one_local(echo(0.0)), Box::new(FixedRouter("local")), Arc::new(PassOracle), Arc::new(RecSpine::default()), None, None);
+        let mut s = step();
+        s.golden_refs = vec!["nope".into()]; // #2 unresolved-ref alarm
+        for f in &engine.run(&mut s, &mut ctx(), req()).await.unwrap().verdict.failures {
+            assert!(f.is_ascii(), "alarm must be ASCII: {f:?}");
+        }
+        let mut s2 = step();
+        s2.critical = true; // #3 critical config-fault alarm
+        for f in &engine.run(&mut s2, &mut ctx(), req()).await.unwrap().verdict.failures {
+            assert!(f.is_ascii(), "alarm must be ASCII: {f:?}");
+        }
     }
 }

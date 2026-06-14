@@ -41,7 +41,7 @@ impl PropertyOracle {
                 let re = Regex::new(r"\b\d{3}-\d{2}-\d{4}\b").expect("static SSN pattern is valid");
                 re.is_match(content).then(|| "no_ssn_pattern: output contains an SSN-shaped span".to_string())
             }
-            other => Some(format!("unknown property '{other}' — fail-closed (cannot assert what it cannot check)")),
+            other => Some(format!("unknown property '{other}' - fail-closed (cannot assert what it cannot check)")),
         }
     }
 }
@@ -83,7 +83,7 @@ impl Oracle for GoldenOracle {
         let mut failures = Vec::new();
         if golden_violated {
             failures.push(if joint_wrong {
-                "JOINT_WRONG: self-tests pass but a frozen golden is violated (systematic — everything looked green)".to_string()
+                "JOINT_WRONG: self-tests pass but a frozen golden is violated (systematic - everything looked green)".to_string()
             } else {
                 "golden_violated: output disagrees with a frozen golden".to_string()
             });
@@ -117,7 +117,7 @@ impl Oracle for SourceOracle {
             });
         }
         let claim = output.artifact["claim"].as_str().unwrap_or("<claim>");
-        let failure = format!("INSUFFICIENT_SOURCE: claim '{claim}' does not trace to the canon (→ human)");
+        let failure = format!("INSUFFICIENT_SOURCE: claim '{claim}' does not trace to the canon (-> human)");
         Ok(Verdict {
             passed: false,
             failures: vec![failure.clone()],
@@ -177,13 +177,13 @@ impl Oracle for SchemaOracle {
         } else {
             match serde_json::from_str(&output.content) {
                 Ok(v) => v,
-                Err(e) => return Ok(Self::reject(format!("schema: output is not JSON ({e}) — rejected, never partially applied"))),
+                Err(e) => return Ok(Self::reject(format!("schema: output is not JSON ({e}) - rejected, never partially applied"))),
             }
         };
         // compile the schema; fail closed if it cannot be compiled (cannot assert what it cannot check).
         let validator = match jsonschema::options().with_draft(PINNED_DRAFT).build(&self.schema) {
             Ok(v) => v,
-            Err(e) => return Ok(Self::reject(format!("schema: cannot compile schema ({e}) — fail-closed"))),
+            Err(e) => return Ok(Self::reject(format!("schema: cannot compile schema ({e}) - fail-closed"))),
         };
         let failures: Vec<String> = validator.iter_errors(&instance).map(|e| format!("schema: {e}")).collect();
         if failures.is_empty() {
@@ -197,6 +197,41 @@ impl Oracle for SchemaOracle {
             let detail = format!("schema-invalid (rejected, never partially applied): {}", failures.join("; "));
             Ok(Verdict { passed: false, failures, joint_wrong: false, evidence: vec![Assertion { kind: "schema".into(), detail }] })
         }
+    }
+}
+
+// ── golden-dispatch oracle (a resolved golden_ref actually asserts) ─────────────
+
+/// Runs each resolved golden case against the live output by dispatching on its **family** — the
+/// piece that makes a *named* `golden_ref` actually assert (canon §10): a step names its gate and it
+/// fires, with **no cell pre-registration**. Bounded + exhaustive over the KNOWN runtime families:
+/// - `input.schema` → [`SchemaOracle`] (validate-or-reject),
+/// - `input.property` → [`PropertyOracle`],
+/// - everything else (conformance-only goldens: cost/usage, `self_tests_pass`, …) → **asserts
+///   nothing** (explicit fall-through). Those are **test-time** conformance goldens, not runtime gates
+///   against a live `StepOutput`. So a critical step whose only ref is conformance-only yields *zero*
+///   correctness evidence and the engine's critical-step guard fails it — **resolving a ref is not
+///   asserting one.** Adding a family means extending this match: a bounded dispatch, never a generic plugin.
+pub struct GoldenDispatchOracle;
+
+#[async_trait]
+impl Oracle for GoldenDispatchOracle {
+    async fn verify(&self, output: &StepOutput, golden: &[GoldenCase], ctx: &Context) -> Result<Verdict> {
+        let mut agg = Verdict { passed: true, failures: Vec::new(), joint_wrong: false, evidence: Vec::new() };
+        for case in golden {
+            let sub = if let Some(schema) = case.input.get("schema") {
+                SchemaOracle::new(schema.clone()).verify(output, &[], ctx).await?
+            } else if let Some(prop) = case.input.get("property").and_then(Value::as_str) {
+                PropertyOracle::new(vec![prop.to_string()]).verify(output, &[], ctx).await?
+            } else {
+                continue; // conformance-only family: not a live-output gate — assert nothing
+            };
+            agg.passed &= sub.passed;
+            agg.joint_wrong |= sub.joint_wrong;
+            agg.failures.extend(sub.failures);
+            agg.evidence.extend(sub.evidence);
+        }
+        Ok(agg)
     }
 }
 
@@ -420,5 +455,50 @@ mod tests {
             oracle.verify(&six, &[], &ctx).await.unwrap().passed,
             "6 > 5 → valid (proves the schema compiled and the constraint is actually applied)"
         );
+    }
+
+    /// A NAMED schema golden_ref actually asserts — no cell pre-registration. Conformant → pass;
+    /// malformed → rejected via the ref. This is what makes `--golden-ref <schema-golden>` a real gate.
+    #[tokio::test]
+    async fn golden_dispatch_runs_schema_family() {
+        let schema_case = GoldenCase {
+            name: "directive-schema".into(),
+            input: json!({ "schema": { "type": "object", "required": ["action"], "properties": { "action": { "type": "string" } } } }),
+            expect: json!({}),
+        };
+        let d = GoldenDispatchOracle;
+        let ctx = Context::default();
+        let good = StepOutput { content: String::new(), artifact: json!({ "action": "spawn" }) };
+        assert!(d.verify(&good, std::slice::from_ref(&schema_case), &ctx).await.unwrap().passed, "conformant → pass via the ref");
+        let bad = StepOutput { content: String::new(), artifact: json!({ "nope": 1 }) };
+        assert!(!d.verify(&bad, std::slice::from_ref(&schema_case), &ctx).await.unwrap().passed, "malformed → rejected via the ref");
+    }
+
+    /// A property-family golden_ref dispatches to PropertyOracle (here: no-SSN on the output).
+    #[tokio::test]
+    async fn golden_dispatch_runs_property_family() {
+        let prop_case = GoldenCase { name: "no-ssn".into(), input: json!({ "property": "no_ssn_pattern" }), expect: json!({}) };
+        let d = GoldenDispatchOracle;
+        let ctx = Context::default();
+        let clean = StepOutput { content: "all clear".into(), artifact: Value::Null };
+        assert!(d.verify(&clean, std::slice::from_ref(&prop_case), &ctx).await.unwrap().passed);
+        let dirty = StepOutput { content: "ssn 123-45-6789".into(), artifact: Value::Null };
+        assert!(!d.verify(&dirty, std::slice::from_ref(&prop_case), &ctx).await.unwrap().passed);
+    }
+
+    /// A conformance-only golden (cost/usage shape — no schema/property family) asserts NOTHING at
+    /// runtime: no evidence, vacuous pass. The engine's critical-step guard turns that into a config
+    /// fault for a critical step — resolving a ref is not asserting one.
+    #[tokio::test]
+    async fn golden_dispatch_skips_conformance_only_family() {
+        let cost_case = GoldenCase {
+            name: "cost".into(),
+            input: json!({ "usage": { "input_tokens": 1000 }, "price": { "input_miss": 0.435 } }),
+            expect: json!({ "cost": 0.0 }),
+        };
+        let d = GoldenDispatchOracle;
+        let v = d.verify(&StepOutput::default(), std::slice::from_ref(&cost_case), &Context::default()).await.unwrap();
+        assert!(v.passed, "non-runtime family asserts nothing → vacuous at the oracle level");
+        assert!(v.evidence.is_empty(), "and produces NO evidence (so a critical step config-faults in the engine)");
     }
 }

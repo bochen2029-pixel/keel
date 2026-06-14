@@ -21,7 +21,7 @@ use keel_contracts::{
 use keel_kernel::engine::{Engine as KernelEngine, EngineConfig, TierSlot};
 use keel_kernel::{Chain, Manifest, Registry, TierCfg};
 use keel_middleware::{AuditMiddleware, AuditSink, CostMiddleware, FileAuditSink, PrivacyMiddleware, Redactor};
-use keel_services::{DifficultyRouter, PropertyOracle, Verifier};
+use keel_services::{DifficultyRouter, GoldenDispatchOracle, PropertyOracle, Verifier};
 use keel_store::SqliteStore;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -86,13 +86,18 @@ impl Engine {
         eprintln!("[keel] engine wired: {:?}", slots.keys().collect::<Vec<_>>());
 
         let router: Box<dyn Router> = Box::new(DifficultyRouter::new(manifest.router.escalate_after_oracle_failures));
-        // I5: the externality registry as a composite Oracle, with the **default-oracle set** — a
-        // baseline non-model assertion on every output (no SSN-shaped span). A cell registers more
-        // (e.g., a `SchemaOracle` for the Director's Directive). The baseline means a critical turn
-        // always carries an assertion; the engine's critical-step guard catches an empty set anyway.
-        let mut verifier = Verifier::new();
-        verifier.register(Box::new(PropertyOracle::new(vec!["no_ssn_pattern".into()])));
-        let oracle: Arc<dyn Oracle> = Arc::new(verifier);
+        // I5 CORRECTNESS oracle: the GoldenDispatchOracle makes a resolved `golden_ref` actually
+        // assert (schema/property family -> the matching oracle), with no cell pre-registration. A cell
+        // registers its domain oracles here too. This is what satisfies the critical-step guard (#3).
+        let mut correctness = Verifier::new();
+        correctness.register(Box::new(GoldenDispatchOracle));
+        let oracle: Arc<dyn Oracle> = Arc::new(correctness);
+        // I3 sovereignty BASELINE (no-SSN-on-output): always-on, folded into the verdict, but it NEVER
+        // counts for #3 (a privacy baseline is not a correctness oracle). STOPGAP until mw::privacy
+        // gains an output-side rung (Stage 2) — see EngineConfig.baseline.
+        let mut baseline_v = Verifier::new();
+        baseline_v.register(Box::new(PropertyOracle::new(vec!["no_ssn_pattern".into()])));
+        let baseline: Option<Arc<dyn Oracle>> = Some(Arc::new(baseline_v));
         // I2: the SQLite index is the first Spine. The append-only file ledger stays the system of
         // record; this index is derived and rebuildable from it. (.keelstate is created by the sink.)
         let spine: Arc<dyn Spine> =
@@ -107,6 +112,7 @@ impl Engine {
             slots,
             router,
             oracle,
+            baseline,
             spine,
             memory: None,
             trace_sink: None,

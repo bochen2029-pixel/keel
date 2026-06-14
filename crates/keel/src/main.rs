@@ -108,9 +108,9 @@ async fn run() -> keel_contracts::Result<()> {
         report(&outcome.result, &ctx, &note, think);
         // I5 surfaced: quiet on a passed (incl. vacuous) verdict; loud on a real oracle failure.
         if outcome.verdict.joint_wrong {
-            eprintln!("[keel] ⚠ JOINT_WRONG — {}", outcome.verdict.failures.join("; "));
+            eprintln!("[keel] !! JOINT_WRONG - {}", outcome.verdict.failures.join("; "));
         } else if !outcome.verdict.passed {
-            eprintln!("[keel] ⚠ verify failed — {}", outcome.verdict.failures.join("; "));
+            eprintln!("[keel] !! verify FAILED - {}", outcome.verdict.failures.join("; "));
         }
     }
     Ok(())
@@ -128,7 +128,7 @@ fn report(res: &GenerateResult, ctx: &Context, route: &str, think: bool) {
     }
     eprintln!("\n[keel] route: {route}");
     eprintln!(
-        "— tier={} model={} cost=${:.4} tokens={}+{} · trace {} · audit→{}",
+        "- tier={} model={} cost=${:.4} tokens={}+{} | trace {} | audit->{}",
         res.tier,
         res.model,
         res.cost,

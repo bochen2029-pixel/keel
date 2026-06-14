@@ -11,4 +11,4 @@ pub mod router;
 pub mod verifier;
 
 pub use router::DifficultyRouter;
-pub use verifier::{GoldenOracle, PropertyOracle, SchemaOracle, SourceOracle, Verifier};
+pub use verifier::{GoldenDispatchOracle, GoldenOracle, PropertyOracle, SchemaOracle, SourceOracle, Verifier};
