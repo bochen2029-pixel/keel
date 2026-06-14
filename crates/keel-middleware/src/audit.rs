@@ -20,6 +20,29 @@ pub struct AuditEvent {
     pub ok: bool,
     /// `"OK"` on success, else the `KeelError` code (canon §18).
     pub code: String,
+    /// Deterministic-redaction labels (`rung{N}:{kind}`, never the values) when this event records
+    /// an I3 mask (canon §5.1); empty for an ordinary call event. `#[serde(default)]` keeps older
+    /// ledger lines (written before this field existed) readable.
+    #[serde(default)]
+    pub redactions: Vec<String>,
+}
+
+impl AuditEvent {
+    /// An I1 record of a deterministic egress redaction (canon §5.1): the masked spans' labels
+    /// (`rung{N}:{kind}`), never their values — so a mask (and thus a potential miss) is
+    /// forensically traceable in the ledger.
+    pub fn redaction(trace_id: String, model: String, redactions: Vec<String>) -> Self {
+        Self {
+            trace_id,
+            t_utc: keel_kernel::now_millis(),
+            model,
+            tier: String::new(),
+            cost: 0.0,
+            ok: true,
+            code: "REDACTION".to_string(),
+            redactions,
+        }
+    }
 }
 
 /// Where audit events go. Append-only; the file ledger is the system of record (canon §11, §13).
@@ -53,6 +76,7 @@ impl Middleware for AuditMiddleware {
                 cost: r.cost,
                 ok: true,
                 code: "OK".to_string(),
+                redactions: Vec::new(),
             },
             Err(e) => AuditEvent {
                 trace_id,
@@ -62,6 +86,7 @@ impl Middleware for AuditMiddleware {
                 cost: 0.0,
                 ok: false,
                 code: e.code().to_string(),
+                redactions: Vec::new(),
             },
         };
         self.sink.emit(&event);

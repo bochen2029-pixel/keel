@@ -220,8 +220,9 @@ fn api_key(tier_name: &str, tcfg: &TierCfg) -> Result<String> {
 /// One chain per tier so the egress mask is correct for that tier's destination.
 fn build_chain(sink: Arc<dyn AuditSink>, redactor: Arc<Redactor>, hard_stop: f64, egress: bool) -> Chain {
     Chain::new(vec![
-        Arc::new(AuditMiddleware::new(sink)),
-        Arc::new(PrivacyMiddleware::new(redactor, egress)),
+        Arc::new(AuditMiddleware::new(sink.clone())),
+        // privacy shares the same sink so every egress redaction is an I1 event (canon §5.1).
+        Arc::new(PrivacyMiddleware::new(redactor, egress, Some(sink))),
         Arc::new(CostMiddleware::new(hard_stop)),
     ])
 }

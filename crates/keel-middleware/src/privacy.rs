@@ -11,6 +11,7 @@
 //! the goldens): this module supplies the *mechanism*; the marker list is configured/frozen by
 //! the operator, never invented by the agent.
 
+use crate::audit::{AuditEvent, AuditSink};
 use async_trait::async_trait;
 use keel_contracts::{Content, Context, GenerateRequest, GenerateResult, Middleware, Next, Result};
 use regex::Regex;
@@ -131,11 +132,15 @@ fn luhn_ok(s: &str) -> bool {
 pub struct PrivacyMiddleware {
     redactor: Arc<Redactor>,
     egress: bool,
+    /// I1 sink for redaction events (canon §5.1). `None` ⇒ mask without auditing (tests / an
+    /// embedder that owns its own audit); the app always wires it, so in production every
+    /// redaction is recorded.
+    audit_sink: Option<Arc<dyn AuditSink>>,
 }
 
 impl PrivacyMiddleware {
-    pub fn new(redactor: Arc<Redactor>, egress: bool) -> Self {
-        Self { redactor, egress }
+    pub fn new(redactor: Arc<Redactor>, egress: bool, audit_sink: Option<Arc<dyn AuditSink>>) -> Self {
+        Self { redactor, egress, audit_sink }
     }
 }
 
@@ -143,12 +148,23 @@ impl PrivacyMiddleware {
 impl Middleware for PrivacyMiddleware {
     async fn handle(&self, mut req: GenerateRequest, ctx: &Context, next: &dyn Next) -> Result<GenerateResult> {
         if self.egress {
+            let mut labels: Vec<String> = Vec::new();
             for msg in &mut req.messages {
                 for content in &mut msg.content {
                     if let Content::Text { text } = content {
-                        let (scrubbed, _findings) = self.redactor.redact(text);
+                        let (scrubbed, findings) = self.redactor.redact(text);
+                        for f in &findings {
+                            labels.push(format!("rung{}:{}", f.rung, f.kind));
+                        }
                         *text = scrubbed;
                     }
+                }
+            }
+            // I3 → I1: every redaction decision is an audited event (canon §5.1) — labels, never
+            // values — so a leak is forensically traceable. No findings ⇒ no event (no noise).
+            if !labels.is_empty() {
+                if let Some(sink) = &self.audit_sink {
+                    sink.emit(&AuditEvent::redaction(ctx.trace_id.clone(), req.model.clone(), labels));
                 }
             }
         }
@@ -159,6 +175,7 @@ impl Middleware for PrivacyMiddleware {
 #[cfg(test)]
 mod tests {
     use super::{PrivacyMiddleware, Redactor};
+    use crate::audit::{AuditEvent, AuditSink};
     use async_trait::async_trait;
     use keel_contracts::{Capabilities, Content, Context, GenerateRequest, GenerateResult, Message, ModelTier, Result, Role};
     use keel_kernel::Chain;
@@ -256,7 +273,7 @@ mod tests {
 
     async fn seen_text(egress: bool) -> String {
         let seen = Arc::new(Mutex::new(String::new()));
-        let mw = PrivacyMiddleware::new(Arc::new(Redactor::new(vec![])), egress);
+        let mw = PrivacyMiddleware::new(Arc::new(Redactor::new(vec![])), egress, None);
         let chain = Chain::new(vec![Arc::new(mw)]);
         chain
             .run(req_with("reach me at a@b.com"), &Context::default(), Arc::new(CaptureTier { seen: seen.clone() }))
@@ -277,5 +294,50 @@ mod tests {
     async fn local_passes_through_unredacted() {
         let s = seen_text(false).await;
         assert_eq!(s, "reach me at a@b.com");
+    }
+
+    // ── I1 audit of redactions (canon §5.1: every redaction is an audited event) ──
+
+    #[derive(Default)]
+    struct VecAuditSink {
+        events: Mutex<Vec<AuditEvent>>,
+    }
+    impl AuditSink for VecAuditSink {
+        fn emit(&self, e: &AuditEvent) {
+            self.events.lock().unwrap().push(e.clone());
+        }
+    }
+
+    async fn run_with_sink(egress: bool, sink: Arc<VecAuditSink>) {
+        let mw = PrivacyMiddleware::new(Arc::new(Redactor::new(vec![])), egress, Some(sink));
+        let chain = Chain::new(vec![Arc::new(mw)]);
+        chain
+            .run(
+                req_with("reach me at a@b.com"),
+                &Context::default(),
+                Arc::new(CaptureTier { seen: Arc::new(Mutex::new(String::new())) }),
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn egress_redaction_emits_an_i1_event() {
+        let sink = Arc::new(VecAuditSink::default());
+        run_with_sink(true, sink.clone()).await;
+        let events = sink.events.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].code, "REDACTION");
+        assert!(events[0].redactions.iter().any(|r| r.contains("email")));
+        // the value itself is never recorded, only the label
+        assert!(!events[0].redactions.iter().any(|r| r.contains("a@b.com")));
+    }
+
+    #[tokio::test]
+    async fn local_call_audits_no_redaction() {
+        // non-egress (local, sovereign-safe): no mask, hence no redaction event.
+        let sink = Arc::new(VecAuditSink::default());
+        run_with_sink(false, sink.clone()).await;
+        assert!(sink.events.lock().unwrap().is_empty());
     }
 }

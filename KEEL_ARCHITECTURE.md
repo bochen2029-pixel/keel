@@ -356,7 +356,7 @@ KEEL assumes four **canonical primitives** and *resolves* them rather than embed
 | `kernel::engine` | K | the canonical closed loop (§8) — optional to use | 7/7 |
 | `kernel::lock` | K | `keel.lock` reproducibility / substrate pin | 4/7 |
 | `mw::audit` | M | I1; append-only behind an `AuditSink` trait (heavy hash-chain swaps in) | 7/7 |
-| `mw::privacy` | M | I3 mask: 3 rungs (operator markers + regex/checksums = the oracle; OpenAI Privacy Filter = recall verification-pass); force-local gate on sovereign + raw perception; redactions I1-audited | 7/7 |
+| `mw::privacy` | M | I3 mask: 3 rungs (operator markers + regex/checksums = the oracle; OpenAI Privacy Filter = recall verification-pass); **redactions are I1-audited** (labels, never values — canon §5.1). The force-local *gate* is the router's (§5, §9), not this mask. | 7/7 |
 | `mw::cost` | M | I4; budget cap, hard-stop, reversibility BLOCK | 6/7 |
 | `mw::cache` | M | cache-prefix discipline (the 100× lever) | 4/7 |
 | `svc::router` | S | the §9 router; degrades to pass-through for single-model cells | 6/7 |
