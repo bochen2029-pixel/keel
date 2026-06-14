@@ -1,5 +1,5 @@
 {
-  "sha256": "63d5ba7cee610e924df09b0c227786e1a031b93ce076296e7dddcb9bf5d6261c",
-  "version": "0.2.0",
-  "note": "sha256 of golden.json `cases` (every section except _meta), canonical-sorted. Operator-frozen; agent read-only. Re-hash to verify (Stage-0 CI gate)."
+  "note": "sha256 of golden.json `cases` (every section except _meta), canonical-sorted (KEEL-native: serde_json sorted-key compact JSON). Operator-frozen; agent read-only. Verified by tests/golden_freeze.rs.",
+  "sha256": "db4377b3c0b3b245e9d64e2c8a817928c66420b103332ab3f079203dc6dac8db",
+  "version": "0.2.0"
 }

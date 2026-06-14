@@ -35,14 +35,12 @@ pub fn canonical_golden_hash(golden_json: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-// Dormant until the operator re-freezes KEEL-native. The stored `.frozen.json` hash (63d5ba7c…) was
-// produced by a NON-KEEL canonicalization (almost certainly Marrow's Python `golden_freeze.py` —
-// float repr `1e-06` vs Rust's `1e-6`), not by drift: the golden CONTENT is git-verified unchanged.
-// Re-stamping the freeze is an OPERATOR action (canon §10 / CLAUDE.md §3: "the contract-freeze IS the
-// governance"). The agent never self-updates the seal — it runs the `golden_freeze` example with
-// `--update` only at the operator's explicit instruction, then un-ignores this test so it guards.
+// ACTIVE since 2026-06-14: the operator re-stamped `.frozen.json` KEEL-native (sha256 db4377b3…,
+// replacing the old Python-canonicalized 63d5ba7c… — same ratified cases, only `1e-6` vs `1e-06`).
+// The gate now guards: if a golden's content drifts, this fails. **Fix the code, never the golden** —
+// re-stamping the seal is an OPERATOR action (canon §10 / CLAUDE.md §3: "the contract-freeze IS the
+// governance"); the agent never self-updates it.
 #[test]
-#[ignore = "operator-only: re-stamp .frozen.json KEEL-native (example golden_freeze --update), then un-ignore"]
 fn goldens_match_the_frozen_hash() {
     let dir = golden_dir();
     let golden = std::fs::read_to_string(dir.join("golden.json")).expect("read golden.json");
