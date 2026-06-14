@@ -5,5 +5,11 @@
 # KEEL run-state (the ledger lives here at runtime; never committed)
 /.keelstate/
 
+# SECRETS — the genesis transcript and its derived chunks contain the operator's plaintext
+# DeepSeek/Anthropic API keys, and this repo is PUBLIC. NEVER commit these.
+/_memories/
+/chunker/_transcript_chunks/
+**/*.chunks/
+
 # editor / OS cruft
 .DS_Store
