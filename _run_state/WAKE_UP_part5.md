@@ -4,14 +4,11 @@
 
 ## 5.1 · The roadmap (sequenced)
 
-**Step 0 — Reconcile the record (cheap; do before more code lands).** None of this touches frozen contracts. It stops the known drift from compounding into the next code:
-- Get/confirm the operator's rulings: (a) **Director = external consumer/dogfood, not a cell; SEXTANT stays the canon first-cell** (this brief's 4.3 ruling — confirm wording); (b) keep-or-cut the Marrow bench reference; (c) codify-or-withhold the autonomy grant.
-- Apply the operator-governed doc fixes: correct **`CLAUDE.md`'s build-state** (Stage 0 complete / Stage 1 + verifier landed / goldens FROZEN) and its first-cell line; correct **`STATE.md`'s Director line** (consumer, not cell).
-- Operator-only: the **golden freeze-gate re-stamp** (then un-ignore the gate).
+**Step 0 — Reconcile the record — ✅ DONE (2026-06-14).** All rulings confirmed and applied: (a) **Director = external consumer/dogfood, NOT a cell; SEXTANT stays the canon first-cell**; (b) **Marrow bench = read-only reference, not a dependency**; (c) **autonomy grant withheld — still SUPERVISED**. Doc fixes landed: CLAUDE.md build-state refreshed; STATE.md Director line + stale `C:\loom` cwd note corrected. The operator re-stamped the golden freeze-gate KEEL-native (`db4377b3…`) and it is un-ignored + green.
 
-**Step 1 — `kernel::engine` (L1): the highest-leverage slice.** Build the canonical loop over *injected* `&dyn Router/Oracle/Memory/Spine/TraceSink` (the same dyn-injection the registry already uses for `ModelTier`): **route → chain → verify → checkpoint → emit**, feeding `oracle_failures`/`tier_history` back so the escalation ladder fires across turns. **One slice → wires I5 live · accumulates I4 cost in `Context` · activates I2 checkpointing · pays the L5→L1 debt.** Then shrink `keel::Engine` (L5) to pure injection. Validate against the existing goldens; diff against the Marrow bench where applicable.
+**Step 1 — `kernel::engine` (L1) — ✅ DONE (2026-06-14, commit `8650a47`).** The canonical loop over *injected* `&dyn Router/Oracle/Spine` (+optional `Memory/TraceSink`) — **route → chain → verify → checkpoint → emit** — wired I5 live, accumulates I4 cost in `Context`, activates I2 checkpointing, and paid the L5→L1 debt; `keel::Engine` (L5) shrank to a pure-injection wrapper. **Observed closed in the real binary** (cross-correlated artifacts: footer trace == audit `trace_id` == SQLite `run_id`). +7 engine tests; 58 green. *The caveat that defines the next slice:* `verify` runs every turn but is **vacuous until oracles register**.
 
-**Step 2 — cheap, independent slices (any order):** `mw::metrics` (`escalation_rate`/`rework_rate` — needed to *size the flywheel base case*) · **constrained-decode conformance** (the `model_tier` golden — the local adapter already has the GBNF/JSON hook; making this green *is* the Backrooms Director's "schema-valid Directive or reject" gate, so it unblocks the dogfood **now**) · config-from-`keel.lock` cleanup.
+**Step 2 — THE NEXT SLICE: constrained-decode + give I5 teeth (operator-sequenced).** (a) **constrained-decode conformance** — turn the `model_tier` golden green (the local adapter already has the GBNF/JSON hook); this *is* the Backrooms Director's "schema-valid Directive or reject" gate, so it unblocks the dogfood. (b) **the default-oracle set + the `golden_refs`→`GoldenCase` registry resolver** — paired with (a), **not** parked deep in Stage 2, because it is what makes the per-turn `verify` actually assert (the honest completion of the I5 loop). Then, any order: `mw::metrics` (`escalation_rate`/`rework_rate` — sizes the flywheel base case) · config-from-`keel.lock` cleanup.
 
 **Step 3 — Stage 2 proper:** `svc::memory` (ringed Tape + consolidation-as-a-Step + narrative/factual registers — `docs/proposals/perpetual-memory.md` is the design input) · privacy rung-3 (the OpenAI Privacy Filter via `ort`, behind `GOLDEN_PRIVACY`) · the live golden registry/freeze-gate. **`amplify` (best-of-N) ships OFF** behind the §23 falsifier.
 
@@ -70,7 +67,7 @@
 - **Rented cognition, owned self.** Genome (frozen contracts + invariants), cells (genome + periphery). Intersection, never union. L1 personal tool, not a product.
 - **Verify by artifact, never recall.** Trust `STATE.md` + git over `CLAUDE.md`'s stale build-state and over any summary. Keep "lived vs reconstructed" honest.
 - **Contracts + goldens are frozen, agent-read-only. Fix code, never goldens. Never re-stamp the seal.**
-- **The five invariants hold on every call; I5 (externalized correctness) is the whole point — and it is the next slice** (`kernel::engine` wires it live + fixes I4/I2 + pays the L5→L1 debt).
+- **The five invariants hold on every call; I5 (externalized correctness) is the whole point — now wired in the loop** (`kernel::engine` calls `verify` every turn; the freeze-gate guards the goldens). It gains *teeth* when oracles register — the next slice (constrained-decode + the golden-registry).
 - **Director = dogfood consumer, NOT a cell; SEXTANT is the canon's first cell.** System is **supervised** until the operator says otherwise.
 - **One slice at a time, banked clean, gated by the operator. The contract-freeze IS the governance — guard it.**
 
