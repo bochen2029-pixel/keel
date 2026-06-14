@@ -46,7 +46,7 @@ The conversation summary is **lossy**. The committed repo + the canon are the tr
 - **file ledger** (I2) + **SQLite store** (the index)
 - **CLI** + **`serve_openai`** (OpenAI-compatible egress)
 - Outcome: a binary that resolves the substrate, talks to a tier, logs every call, consumable embedded or over protocol. **Falsifier: > ~2 weeks → rethink the native-core thesis.**
-- Then **first cell**: re-home **NightClerk or NightScribe** (controlled experiment). Then SEXTANT.
+- Then **first cell = the first real test**: the **game's Director**. Operator intent (2026-06-13): once KEEL is built out, re-home the game's **Director** as the first KEEL cell — a real, demanding *interactive* workload (ref. my own earlier line "the Director could be a KEEL cell"). This is the chosen falsifier-grade test; **NightClerk / NightScribe / SEXTANT** remain as alternative/later cells. *(Director/game specifics were discussed pre-compaction and are NOT in the post-compaction summary — verify them with the operator before building against them.)*
 
 ## Disciplines (don't drift)
 - Contracts + goldens are **frozen** (agent read-only). The contract-freeze IS the governance.
