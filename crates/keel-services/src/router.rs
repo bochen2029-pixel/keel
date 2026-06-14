@@ -42,11 +42,11 @@ impl Router for DifficultyRouter {
     fn route(&self, step: &Step, ctx: &Context) -> Decision {
         // 1. raw perception (image/clip/audio) is sovereign-by-default → local (I3). Overrides all.
         if step.content.iter().any(|c| !matches!(c, Content::Text { .. })) {
-            return forced_local("raw perception is sovereign — forced local (I3, perception)");
+            return forced_local("raw perception is sovereign - forced local (I3, perception)");
         }
         // 2. sovereign / PHI data → local (I3).
         if matches!(step.data_class, DataClass::Sovereign | DataClass::Phi) {
-            return forced_local("sovereign data — privacy forces local (I3)");
+            return forced_local("sovereign data - privacy forces local (I3)");
         }
         // 3. cost governor: projected cost breaches the remaining budget → BLOCK to operator (I4).
         if let (Some(pc), Some(rem)) = (step.projected_cost, ctx.budget_remaining()) {
@@ -54,7 +54,7 @@ impl Router for DifficultyRouter {
                 return Decision {
                     tier: "BLOCK".to_string(),
                     effort: Effort::default(),
-                    reason: format!("projected cost ${pc:.2} over budget ${rem:.2} — BLOCK (I4)"),
+                    reason: format!("projected cost ${pc:.2} over budget ${rem:.2} - BLOCK (I4)"),
                 };
             }
         }
@@ -78,7 +78,7 @@ impl Router for DifficultyRouter {
         let reason = if escalated {
             format!("escalated to {tier} after {} oracle failures", step.oracle_failures)
         } else {
-            format!("{} → {tier}", kind_label(step.kind))
+            format!("{} -> {tier}", kind_label(step.kind))
         };
         Decision { tier: tier.to_string(), effort: effort_for(idx), reason }
     }
@@ -215,5 +215,23 @@ mod tests {
         step.oracle_failures = 0;
         step.tier_history = vec![];
         assert_eq!(r.route(&step, &Context::default()).tier, "cheap-API");
+    }
+
+    #[test]
+    fn route_reasons_are_ascii() {
+        // the CLI footer prints the route reason on any console/codepage — keep it ASCII (the same
+        // discipline as the I5 alarm: a print must never be eaten by a cp1252 console).
+        let r = DifficultyRouter::default();
+        for input in [
+            serde_json::json!({ "content": ["image"] }),                                          // perception -> local
+            serde_json::json!({ "data_class": "sovereign" }),                                      // sovereign -> local
+            serde_json::json!({ "kind": "core-wire" }),                                            // core-wire -> tier
+            serde_json::json!({ "projected_cost": 9.0, "budget_remaining": 1.0 }),                 // budget BLOCK
+            serde_json::json!({ "kind": "core-wire", "tier_history": ["cheap-API"], "oracle_failures": 2 }), // escalated
+        ] {
+            let (step, ctx) = build_step(&input);
+            let reason = r.route(&step, &ctx).reason;
+            assert!(reason.is_ascii(), "route reason must be ASCII: {reason:?}");
+        }
     }
 }

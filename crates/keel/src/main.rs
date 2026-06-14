@@ -109,7 +109,7 @@ async fn run() -> keel_contracts::Result<()> {
         let outcome = engine.run(&mut step, &mut ctx, req).await?;
         let mut note = outcome.decision.reason.clone();
         if outcome.substituted {
-            note = format!("{note} — chosen tier '{}' unavailable, fell back to '{}'", outcome.decision.tier, outcome.tier_used);
+            note = format!("{note} - chosen tier '{}' unavailable, fell back to '{}'", outcome.decision.tier, outcome.tier_used);
         }
         report(&outcome.result, &ctx, &note, think);
         // I5 surfaced: quiet on a passed (incl. vacuous) verdict; loud on a real oracle failure.
