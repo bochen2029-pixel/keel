@@ -1,0 +1,15 @@
+[package]
+name = "keel-store"
+description = "KEEL L2 — the index (SQLite, bundled, behind a Store seam): backs the Spine (I2 checkpoint/resume)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+keel-contracts = { path = "../keel-contracts" }
+async-trait = "0.1"
+serde_json = "1"
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }
