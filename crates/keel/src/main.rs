@@ -21,6 +21,12 @@ async fn main() {
 }
 
 async fn run() -> keel_contracts::Result<()> {
+    // `keel metrics` — an off-loop, read-only rollup over the I2 index (no manifest, no tier, no loop).
+    if std::env::args().nth(1).as_deref() == Some("metrics") {
+        let store = keel_store::SqliteStore::open(keel::INDEX_DB)?;
+        print_metrics(&store.metrics()?);
+        return Ok(());
+    }
     let mut manifest_path = "keel.lock".to_string();
     let mut tier_override: Option<String> = None;
     let mut think = false;
@@ -137,4 +143,19 @@ fn report(res: &GenerateResult, ctx: &Context, route: &str, think: bool) {
         ctx.trace_id,
         keel::AUDIT_LEDGER
     );
+}
+
+/// Print the off-loop metric rollup (canon 19) — ASCII, console-safe on any codepage.
+fn print_metrics(m: &keel_store::MetricsSummary) {
+    println!("KEEL metrics (reader over {}; off-loop, read-only)", keel::INDEX_DB);
+    println!("  turns            {}", m.turns);
+    println!("  escalation_rate  {:.3}   (turns above the kind's base tier; flywheel target: down)", m.escalation_rate);
+    println!("  rework_rate      {:.3}   (model/content verify-fails, excl. wiring; proxy - precise canon metric deferred)", m.rework_rate);
+    println!("  total_cost       ${:.4}", m.total_cost);
+    let by_tier = if m.by_tier.is_empty() {
+        " (none)".to_string()
+    } else {
+        m.by_tier.iter().map(|(t, n)| format!(" {t}={n}")).collect::<String>()
+    };
+    println!("  by_tier         {by_tier}");
 }
