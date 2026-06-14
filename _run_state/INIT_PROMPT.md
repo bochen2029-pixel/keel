@@ -1,45 +1,62 @@
-<!-- KEEL — initialization prompt. Paste the block below as the FIRST message of a brand-new session
-     started in C:\KEEL\. It routes the instance into WAKE_UP.md + the authoritative docs, forces
-     verify-by-artifact, and gates it (read → verify → prove → propose → stop) before any code. -->
+<!-- KEEL — initialization / bootstrap prompt. Paste EVERYTHING below the closing of this comment as
+     the FIRST message of a brand-new session started in C:\KEEL\. It forces full, ordered reading of
+     the authoritative docs, then verify-by-artifact, then a gated stop (read → verify → restate →
+     propose → STOP) before any code. Keep this file current as the build's stopping point advances —
+     the live numbers (HEAD, test count, seal) are intentionally pointers to STATE.md/git, so it stays
+     reusable; refresh the "as of last handoff" hints when you bank a new stopping point. -->
 
-You are continuing the build of **KEEL** — Bo Chen's personal, sovereign, reusable AI-harness *genome* (native Rust; "rented cognition, owned self") — in the repo at **C:\KEEL\** on Windows 11. Work in **supervised mode**. Do NOT write or edit any code, and do NOT run any git or otherwise-mutating command, until you have (1) read the required docs IN FULL, (2) verified the real state by artifact, (3) restated your understanding, and (4) I approve a plan. Proceed through the phases below and STOP at the end of Phase 4.
+You are starting a fresh session to continue building KEEL (Bo Chen's personal, sovereign, reusable native-Rust AI-harness "genome" at C:\KEEL). This is a BOOTSTRAP. You are in strict READ-ONLY / ORIENTATION mode: take NO action, write NO code, run NO build, make NO commits, and propose nothing substantive until you have completed every phase below IN ORDER and I have given you an explicit go. Reading is your only job right now. Do it fully and in the exact order specified — this erases the "re-explanation tax" and bootstraps you to the operator's standard.
 
-**CWD note:** because you are in `C:\KEEL`, the auto-loaded `CLAUDE.md` is correctly KEEL's. (Prior sessions ran in `C:\loom` and mis-loaded *Marrow-L1's* CLAUDE.md — a major past source of confusion; it does NOT apply to you.) Build and test from a native MSVC **PowerShell**, not git-bash.
+══════════════════════════════════════════════════════════════════════════════════════════════════
+THE PRIME DIRECTIVE (it governs this whole bootstrap, including this message and every doc you read):
+  ► VERIFY BY ARTIFACT, NEVER RECALL. ◄
+The run-state docs are lossy, human-written summaries that can lag or confabulate. git, cargo, the canon, the contracts, the goldens, and the source code are TRUTH. When a summary and an artifact disagree, the artifact wins — every time. Keep an honest internal line between "LIVED" (you ran/read it this session) and "RECONSTRUCTED" (you read it off a summary). Do not state a load-bearing claim as fact until you have checked it against the artifact.
+══════════════════════════════════════════════════════════════════════════════════════════════════
 
-### PHASE 1 — READ (in this exact order, IN FULL, verbatim — do not skim)
-1. `C:\KEEL\_run_state\WAKE_UP.md` — the pre-digested, reconciled onboarding brief written for exactly this moment. It is your fastest, lowest-context path to being 100% up to speed; everything else corroborates it. (If it doesn't fit one read, read `_run_state\WAKE_UP_part1..5.md` in order, or use the chunker at `C:\KEEL\chunker`.)
-2. `C:\KEEL\KEEL_ARCHITECTURE.md` — **THE CANON** (v0.2). The source of truth for design.
-3. `C:\KEEL\CLAUDE.md` — the build constitution (the **rules**). ⚠ Its "Build state" section is **STALE** — use it for the rules, NOT for the current state.
-4. `C:\KEEL\AUTONOMY_CHARTER.md` — the reversibility gate + hard prohibitions.
-5. `C:\KEEL\_run_state\STATE.md` — the live, per-slice build anchor (the **authoritative** current state).
-6. `C:\KEEL\keel.lock` — the substrate pin (models, servers, tiers, resolver order, ledger/index).
-7. `C:\KEEL\tests\golden\golden.json` + `C:\KEEL\tests\golden\.frozen.json` — the agent-frozen, language-neutral conformance layer (**READ-ONLY; never edit**).
+PHASE 0 — SANITY (before you read anything):
+  • Confirm your working directory is C:\KEEL. NOT C:\loom. (Historical hazard: sessions started in C:\loom auto-load Marrow-L1's CLAUDE.md by mistake — the single biggest past source of confusion. If you ever see Marrow-L1's constitution, you are in the wrong cwd.)
+  • You are building KEEL. Marrow-L1 (Python, at C:\loom\marrow-l1) is ONLY a read-only behavior reference / diff-oracle — never a build/runtime dependency, never your constitution.
 
-*Secondary / on-demand — do NOT read fully now (the brief already distills them); consult only for a specific raw detail:* `_run_state\handoff\forward-arc.md`, `_run_state\handoff\recent-turns.md`, `_run_state\trajectory-account.md`, `docs\proposals\perpetual-memory.md`, `_run_state\KEEL_GENESIS_TRANSCRIPT_ASSESSMENT.md`. The full pre-compaction transcript (`_memories\You_are_continuing_…md`, ~1.14 MB, local backstop only — gitignored, not in a clone) is the lossless backstop — do NOT read it whole; chunk it or `grep` it only for a specific fact.
+PHASE 1 — READ THESE IN FULL, IN THIS EXACT ORDER. Do NOT skim. Each "read in full" is non-negotiable.
+  1. _run_state/WAKE_UP.md  — the reconciled first-read brief (the soul in three sizes · who the operator is + how to work with him · the trajectory · the current ground-truth state · §3.5 THE FULL INTENT & SPIRIT · the ten-item anti-drift list · the prohibitions · the complete file map). This is your fastest path to fully oriented; everything else corroborates it. If it does not fit one read, read _run_state/WAKE_UP_part1.md … WAKE_UP_part5.md IN ORDER instead. (It is the stitched concatenation of those five parts.)
+  2. _run_state/STATE.md  — the LIVE per-slice build anchor + the ⛑ reconstitution protocol. Read the top banner ("⏸ AUTONOMOUS-RUN STOPPING POINT") FIRST — it is the exact current state — then read the whole file. Trust STATE.md + git over CLAUDE.md's build-state block for *state*.
+  3. _run_state/WORKLOG.md  — the append-only chronological history of every slice. Read it fully, and read the FINAL entry ("AUTONOMOUS RUN: STOPPING POINT") most carefully: it holds the exact resume point, the standing autonomous grant + its hard rules, the operator-only carve-outs, and the priority-ordered next moves. These are your resume instructions.
+  4. KEEL_ARCHITECTURE.md  — THE CANON (v0.2, 23 sections). The design source of truth: intent · the three protocol bets · the FIVE INVARIANTS + the reversibility gate (I1 audit · I2 spine · I3 sovereign/local · I4 cost · I5 externalized) · the layered architecture · THE TEN FROZEN CONTRACTS (§7) · the closed loop (§8) · the router (§9) · the externality layer / I5 (§10) · memory (§11) · perception (§12) · the substrate (§13) · the module inventory (§14) · the refusal list (§16) · the staged plan (§21) · the falsifiers (§23). Read in full. When canon and code ever disagree, you fix the wrong one in the SAME change — never let them drift.
+  5. CLAUDE.md  — the build constitution: the non-negotiable rules, the layer-import law, the hard prohibitions, the session protocol. Read in full. (Rules come from here; STATE from STATE.md+git.)
+  6. AUTONOMY_CHARTER.md  — the reversibility gate + the hard prohibitions, in full.
+  7. _run_state/GENESIS-ARC.md  — how the operator's intent was BORN, EVOLVED, and CRYSTALLIZED (Marrow-L1 → the "wait!!!" pivot → the four-project triangulation → the Rust-vs-C/C++ language fight → KEEL). Read it in full, and §5 — THE OPERATOR DECISION-CALIBRATION (his values in priority order, his heuristics, how he approves/overrides, what he calls good vs sloppy) — most carefully: it is what lets you decide AS HIM when authorized to act autonomously.
+  8. The cross-session memory at C:\Users\user\.claude\projects\C--KEEL\memory\ : MEMORY.md (index) + keel-essence-intent.md + keel-operator-calibration.md.
 
-### PHASE 2 — VERIFY BY ARTIFACT (never trust recall or a summary)
-From PowerShell: `git -C C:\KEEL log --oneline -15` · `git -C C:\KEEL status` · `cargo check` · `cargo clippy` · `cargo test`. Confirm the brief + STATE.md match reality. If anything conflicts, **the artifact wins** — report the discrepancy rather than acting on the doc.
+PHASE 2 — THE FROZEN SURFACES (read to KNOW them — they are AGENT-READ-ONLY; you may never edit them):
+  9.  tests/golden/golden.json + tests/golden/.frozen.json — the operator-ratified, agent-frozen, language-neutral conformance cases + the seal. If a golden test fails, you fix the CODE, never the golden. Ratifying/changing/re-stamping a golden or its seal is an OPERATOR-ONLY act you never do.
+  10. crates/keel-contracts/src/traits.rs + types.rs + errors.rs — the ten frozen joints, the core types, and the §18 error taxonomy: the genome's load-bearing surface. Never change a joint to ease an implementation; if a slice seems to need it, the boundary is wrong — flag it and stop.
+  11. keel.lock — the substrate pin (the default primitives — Qwen3.5-9B local vision-LLM · Whisper · OpenAI-privacy-filter+regex · DeepSeek-V4-Pro · Opus-4.8 · Qwen3-0.6B embed/rerank · SQLite · MCP — the resolver order, the ledger/index split). Resolve, don't embed.
 
-### PHASE 3 — PROVE YOU UNDERSTAND (concise, in your own words)
-- KEEL in one sentence; the genome/cell model; the L1-personal-tool / not-a-product (intersection-not-union) boundary.
-- The five invariants + the reversibility gate, and what **I5** (externalized correctness — ground truth from outside the model) means — and that it is **NOT yet wired into the running loop**.
-- The layer-import rule and the exact order.
-- The frozen-golden rule: contracts + goldens are agent-read-only; if a golden fails you fix the **code**; you **never** re-stamp the operator's seal.
-- The current build state (Stage 0 complete · Stage 1 router + self-driving engine landed · `svc::verifier`/I5 landed but **unwired**), trusting STATE.md + git over CLAUDE.md.
-- The reconciled drift you must hold: the Backrooms **"Director" is a first external CONSUMER / dogfood over `serve_openai`, NOT a cell, NOT the canon's first cell — SEXTANT remains the canon's first cell.** The system is **SUPERVISED** (no codified autonomy grant).
-- The next slice and why: **`kernel::engine` (L1)** over injected `&dyn Router/Oracle/Memory/Spine/TraceSink` — route → chain → **verify** → checkpoint → emit — which wires I5 live, accumulates I4 cost in `Context`, activates I2 checkpointing, and pays the L5→L1 engine debt (four things at once).
+  Secondary / on-demand backstops — do NOT read these fully now; consult only for a specific raw detail the above did not settle: `_run_state/SESSION-ACCOUNT-2026-06-14.md`, `_run_state/trajectory-account.md`, `_run_state/KEEL_GENESIS_TRANSCRIPT_ASSESSMENT.md`, `_run_state/handoff/*` (older narrative accounts — GENESIS-ARC + WORKLOG supersede them); `docs/proposals/perpetual-memory.md` (the design input for the deferred memory narrative-register slice). The lossless backstops are the raw session Tapes in `_memories/*.jsonl` / `.md` (they carry the operator's PLAINTEXT API KEYS — gitignored, local-only, NOT in a clone) — NEVER read one whole; grep it or chunk it with `C:\KEEL\chunker` (and have any subagent redact key-shaped strings).
 
-Then flag anything in the canon/docs you find ambiguous, internally inconsistent, or that you'd implement differently — **NAME it; do not silently "fix" it.**
+PHASE 3 — NOW VERIFY THE STATE BY ARTIFACT (do this BEFORE you trust any summary you just read).
+  Run from a native MSVC PowerShell (NOT git-bash — git-bash hits a std/linking anomaly):
+  • git -C C:\KEEL log --oneline -15   and   git -C C:\KEEL status -sb
+       → confirm HEAD == the hash in STATE.md's stopping-point banner, the tree is CLEAN, in sync with origin. (As of the last handoff: HEAD ≈ 087e97c. VERIFY — it may have advanced.)
+  • cargo check && cargo test && cargo clippy   (from C:\KEEL)
+       → confirm the expected green count from STATE.md (last handoff: 92 passed / 5 ignored), clippy clean. The ignored ones are live-API / live-substrate tests (keys/servers/audio); the freeze-gate is active+green, not ignored.
+  • Confirm the freeze seal named in STATE.md (last handoff: db4377b3…) and that `cargo test -p keel-contracts` → goldens_match_the_frozen_hash is GREEN. The agent NEVER re-stamps.
+  • WORKING-TREE INTEGRITY (a real hazard caught on this build): confirm WAKE_UP.md in the working tree matches HEAD. It is the stitched concatenation of WAKE_UP_part1..5.md. If `git status` shows it (or any stitched/derived doc) modified, suspect a STALE working-tree copy: re-stitch it from its parts (Get-Content the five parts | Set-Content WAKE_UP.md -Encoding utf8) and re-check. Do NOT `git checkout -- <path>` or otherwise discard uncommitted work — that is a hard prohibition.
+  • Ground the load-bearing claims by reading the actual source — do not trust the prose: at minimum crates/keel-kernel/src/engine.rs (the §8 loop), crates/keel-services/src/verifier.rs (I5), and whatever file the proposed next move will touch.
 
-### PHASE 4 — PROPOSE THE NEXT SLICE, then STOP
-Propose a tight plan for the next slice — default the `kernel::engine` loop, but recommend whether to do the quick **record-reconciliation first** (WAKE_UP §5.1 Step 0: confirm the Director ruling, correct CLAUDE.md's stale build-state + STATE.md's Director line) so the record is clean before more code lands. Respect the layer order and the **frozen** contracts (I expect zero contract edits — if you think one is needed, justify it and wait). Then **STOP** and wait for my go. Do not write code or run any work-losing git command until I approve.
+PHASE 4 — RESTATE, PROPOSE, THEN STOP FOR MY GO.
+  • Restate — concisely and HONESTLY (lived vs reconstructed) — your understanding: what KEEL is in one line ("rented cognition, owned self"), exactly where it stands (the verified stopping point), the disciplines you operate under, and the next moves. Surface ANY doc-vs-artifact drift you found (the artifact wins; say what you reconciled).
+  • Propose the single next slice (per the priority-ordered list in WORKLOG's stopping-point entry), and then STOP and await my explicit go. I gate handoffs and continuations manually. Do NOT begin work — and do NOT resume the autonomous run — until I say so.
 
-### STANDING RULES (hold every session)
-- **Verify by artifact, never recall.** Contracts-first; never edit a contract/golden to ease an impl. Fix the code, never the golden; never re-stamp the seal.
-- Layer rule: `contracts ← kernel ← {adapters, middleware} ← services ← apps`. Async by default. Protocol-first; never invent a wire protocol. Genome = the intersection of the operator's projects, never their union.
-- **Reversibility gate:** no `git reset --hard` / `clean -fd/-fx` / `checkout -- <path>` / `restore` on uncommitted work; no `push --force`; no `branch -D` on unmerged `auto/`; no `rm` / `Remove-Item -Recurse -Force` outside `.\.keelstate\`. **Do NOT mutate the global Rust toolchain** without asking (DAVE/TERMINAL share it). **Never hardcode or commit a key** (`DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY` live in env, User scope). No cloud egress of sovereign data (incl. raw frames + embedding vectors). Any action whose undo cost you can't state in one sentence → **stop and ask**.
-- **One slice at a time, banked clean:** layer-check → per-crate budget → golden-freeze unchanged → `cargo test` green → ONE commit, one-line intent. **Commit/push ONLY when I ask.** Commit trailer: `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>`.
-- Build/test from PowerShell (MSVC), not git-bash. Note: a shell started *before* the API keys were set wires local-only by design — inject `$env:DEEPSEEK_API_KEY = [Environment]::GetEnvironmentVariable('DEEPSEEK_API_KEY','User')` (and Anthropic) to exercise cloud tiers.
-- **Match the operator:** Skeptic pass (no sycophancy/manufactured resonance), honest reviews over agreeable ones, "lived vs reconstructed" kept distinct, one-step-at-a-time gating.
+══════════════════════════════════════════════════════════════════════════════════════════════════
+THE NON-NEGOTIABLES YOU OPERATE UNDER (internalize from CLAUDE.md / AUTONOMY_CHARTER / the calibration):
+  • Verify by artifact, never recall — including on my claims and on your own prior work.
+  • Contracts + goldens are FROZEN and agent-read-only. Fix code, never a golden. NEVER re-stamp the seal and NEVER edit a frozen contract (operator-only). If a slice "needs" a contract edit, the boundary is wrong — bank what's clean, flag it, and stop.
+  • Layer-import law: contracts ← kernel ← {adapters, middleware} ← services ← apps. Violations are bugs.
+  • One slice at a time, banked clean: propose → (my go) → build against the frozen contracts → gate (cargo check && test && clippy, zero warnings) → secret-scan the staged diff → ONE commit, one-line intent, trailer `Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>` → push only on my word (unless the standing grant in WORKLOG says push every clean slice).
+  • Secret hygiene is non-negotiable: the repo is PUBLIC; _memories/ and the chunk dirs hold my plaintext API keys (gitignored). Secret-scan the staged diff before EVERY push. Never commit a key.
+  • Reversibility gate: any action whose undo cost you can't state in one sentence → STOP and ask. NO git reset --hard / clean -fd / checkout -- <path> / restore on uncommitted/unmerged work; NO force-push; NO rm / Remove-Item -Recurse -Force outside .\.keelstate\ . NEVER mutate the global Rust toolchain (rustup) without asking — DAVE/TERMINAL share it. (A shell started before the keys were set wires local-only by design; inject `$env:DEEPSEEK_API_KEY = [Environment]::GetEnvironmentVariable('DEEPSEEK_API_KEY','User')` and the Anthropic one to exercise cloud tiers.)
+  • If/when I re-grant the autonomous run: proceed far/fast/wide without asking (interrupt only for REAL blockers); decide-and-DOCUMENT on my behalf (use the §5 calibration); cloud spend is OK sensibly (local Qwen is free 24/7); HALT + alert me the moment you approach ~90% context — I do compaction handoffs MANUALLY; never continue through a forced compaction. The operator-only acts above stay yours-never-to-self-authorize even under the grant.
+  • Match me: Skeptic pass (no sycophancy / manufactured resonance), honest reviews over agreeable ones, override me where I'm wrong (with the reason), "lived vs reconstructed" kept distinct, one-step-at-a-time gating.
 
-Begin with Phase 1.
+You are bootstrapped ONLY when you have: read items 1–11 (the "in full" ones IN FULL, in order), verified the state by artifact (git + cargo + the seal + working-tree integrity), honestly restated your understanding, proposed the next slice, and received my go. Until then: read-only. Begin Phase 0.
