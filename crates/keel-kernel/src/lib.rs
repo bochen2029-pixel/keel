@@ -5,7 +5,7 @@
 //!
 //! - **landed:** `manifest` (config → behavior) · `context` (the object that flows every call) ·
 //!   `registry` (tier → adapter) · `chain` (the middleware executor) · `lifecycle` (the substrate
-//!   resolver — probe/resolve done; launch + supervise next).
+//!   resolver — probe/resolve **and** launch/supervise).
 //! - **next:** `engine` (the closed loop) · `lock` (reproducibility / substrate pin).
 
 pub mod chain;
@@ -16,6 +16,8 @@ pub mod registry;
 
 pub use chain::Chain;
 pub use context::{new_context, new_trace_id, now_millis};
-pub use lifecycle::{default_local_candidates, probe, resolve_endpoint};
+pub use lifecycle::{
+    default_local_candidates, launch, probe, resolve_endpoint, LlamaServer, LlamaServerConfig,
+};
 pub use manifest::{CostCfg, Manifest, PriceCfg, RouterCfg, TierCfg};
 pub use registry::Registry;

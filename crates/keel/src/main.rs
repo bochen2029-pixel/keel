@@ -16,6 +16,12 @@ use std::sync::Arc;
 const DEEPSEEK_ENDPOINT: &str = "https://api.deepseek.com";
 const AUDIT_LEDGER: &str = ".keelstate/audit.jsonl";
 
+// local substrate launch (paths match keel.lock; keel.lock-driven config is a refinement)
+const LLAMA_EXE: &str = r"C:\llama.cpp\llama-server.exe";
+const LLAMA_MODEL: &str = r"C:\models\Qwen3.5-9B-Q5_K_M.gguf";
+const LLAMA_MMPROJ: &str = r"C:\models\mmproj-F16.gguf";
+const LLAMA_LOG: &str = ".keelstate/llama-server.log";
+
 #[tokio::main]
 async fn main() {
     if let Err(e) = run().await {
@@ -55,12 +61,26 @@ async fn run() -> keel_contracts::Result<()> {
     // wiring reads the manifest's adapter name → builds the L2 adapter (the kernel never imports L2)
     let adapter: Arc<dyn ModelTier> = match tcfg.adapter.as_str() {
         "local_llama" => {
-            // resolve the substrate (c1): an explicit endpoint, else probe the running servers
+            // resolve the substrate: explicit endpoint → probe running servers (c1) → launch (c2)
             let endpoint = match tcfg.endpoint.clone() {
                 Some(e) => e,
-                None => keel_kernel::resolve_endpoint(&keel_kernel::default_local_candidates())?,
+                None => match keel_kernel::resolve_endpoint(&keel_kernel::default_local_candidates()) {
+                    Ok(e) => {
+                        eprintln!("[keel] local substrate → {e}");
+                        e
+                    }
+                    Err(_) => {
+                        eprintln!("[keel] no server up — cold-starting llama-server (first call loads the model)…");
+                        let mut cfg = keel_kernel::LlamaServerConfig::new(LLAMA_EXE, LLAMA_MODEL);
+                        cfg.mmproj = Some(LLAMA_MMPROJ.to_string());
+                        cfg.log_path = Some(LLAMA_LOG.to_string());
+                        let server = keel_kernel::launch(&cfg)?;
+                        let ep = server.endpoint().to_string();
+                        eprintln!("[keel] llama-server ready → {ep} (pid {})", server.pid());
+                        ep // handle drops here; the process keeps running (detached for reuse)
+                    }
+                },
             };
-            eprintln!("[keel] local substrate → {endpoint}");
             Arc::new(
                 LocalLlama::new(endpoint, tcfg.model.clone(), tier_name.clone(), tcfg.price.to_price(), tcfg.vision)
                     .with_max_tokens(2048),
