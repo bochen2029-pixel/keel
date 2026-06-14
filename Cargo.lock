@@ -806,6 +806,7 @@ version = "0.2.0"
 dependencies = [
  "async-trait",
  "jsonschema",
+ "keel-adapters",
  "keel-contracts",
  "regex",
  "serde_json",
