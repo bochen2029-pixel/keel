@@ -10,3 +10,8 @@ async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 futures-core = "0.3"
+
+[dev-dependencies]
+# the golden freeze-gate (tests/golden_freeze.rs) re-hashes the frozen ground truth; test-only, so
+# L0 stays runtime-pure.
+sha2 = "0.10"
