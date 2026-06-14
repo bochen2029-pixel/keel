@@ -233,6 +233,13 @@ impl Engine {
         let state = serde_json::to_value(&trace).map_err(|e| KeelError::Other(format!("trace encode: {e}")))?;
         self.spine.checkpoint(&ctx.trace_id, &state).await?;
 
+        // (8a) append the full Trace to the Memory **Tape** — the lossless system of record (canon
+        //      §11); the SQLite checkpoint above is the derived, rebuildable index. A `None` memory
+        //      (the off-Tape default) skips. This is what `assemble` reads back as Ring-2 next turn.
+        if let Some(mem) = &self.memory {
+            mem.record(&trace).await?;
+        }
+
         // (9) a passed verdict is flywheel feedstock (the sink scrubs secrets before distill, §5).
         if verdict.passed {
             if let Some(sink) = &self.trace_sink {
@@ -390,6 +397,25 @@ mod tests {
         }
     }
 
+    /// Counts records — proves the engine appends the Trace to the Memory Tape each turn (canon §11).
+    #[derive(Default)]
+    struct RecMemory {
+        records: Arc<Mutex<u32>>,
+    }
+    #[async_trait]
+    impl Memory for RecMemory {
+        async fn assemble(&self, _s: &Step, _c: &Context) -> Result<AssembledContext> {
+            Ok(AssembledContext::default())
+        }
+        async fn record(&self, _t: &Trace) -> Result<()> {
+            *self.records.lock().unwrap() += 1;
+            Ok(())
+        }
+        async fn consolidate(&self) -> Result<Step> {
+            Ok(step())
+        }
+    }
+
     // ── fixtures ──
     fn step() -> Step {
         Step {
@@ -534,6 +560,27 @@ mod tests {
         assert_eq!(msgs.len(), 1);
         assert!(matches!(msgs[0].role, Role::System));
         assert!(matches!(&msgs[0].content[0], Content::Text { text } if text == "SOUL"));
+    }
+
+    #[tokio::test]
+    async fn memory_records_the_trace_each_turn() {
+        // I2/§11: with a Memory wired, the engine appends the full Trace to the Tape every turn.
+        let inner = RecMemory::default();
+        let records = inner.records.clone();
+        let mem: Arc<dyn Memory> = Arc::new(inner);
+        let engine = engine_with(
+            one_local(echo(0.0)),
+            Box::new(FixedRouter("local")),
+            Arc::new(EvidenceOracle),
+            Arc::new(RecSpine::default()),
+            Some(mem),
+            None,
+        );
+        let mut s = step();
+        let mut c = ctx();
+        engine.run(&mut s, &mut c, req()).await.unwrap();
+        engine.run(&mut s, &mut c, req()).await.unwrap();
+        assert_eq!(*records.lock().unwrap(), 2, "the Tape is appended every turn (canon §11)");
     }
 
     #[tokio::test]

@@ -21,7 +21,7 @@ use keel_contracts::{
 use keel_kernel::engine::{Engine as KernelEngine, EngineConfig, TierSlot};
 use keel_kernel::{Chain, Manifest, Registry, TierCfg};
 use keel_middleware::{AuditMiddleware, AuditSink, CostMiddleware, FileAuditSink, PrivacyMiddleware, Redactor};
-use keel_services::{DifficultyRouter, GoldenDispatchOracle, PropertyOracle, Verifier};
+use keel_services::{DifficultyRouter, FileMemory, GoldenDispatchOracle, PropertyOracle, Verifier};
 use keel_store::SqliteStore;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -34,6 +34,9 @@ pub const ANTHROPIC_ENDPOINT: &str = "https://api.anthropic.com";
 pub const AUDIT_LEDGER: &str = ".keelstate/audit.jsonl";
 /// The SQLite index backing the I2 `Spine` (derived/rebuildable; the file ledger is the record).
 pub const INDEX_DB: &str = ".keelstate/index.db";
+/// The append-only Memory **Tape** — the lossless factual register (canon §11); persistent working
+/// memory across runs. The SQLite index above is the derived checkpoint.
+pub const TAPE_PATH: &str = ".keelstate/tape/tape.jsonl";
 /// Operator-frozen ground truth the engine resolves `step.golden_refs` against (read-only). KEEL's
 /// own conformance set; a cell points the registry at its own goldens instead.
 pub const GOLDEN_PATH: &str = "tests/golden/golden.json";
@@ -106,15 +109,18 @@ impl Engine {
         // (read-only, best-effort from golden.json; a cell injects its own). Empty if the file is
         // absent — a plain chat turn carries no refs, so the fail-closed guard only bites a ref'd step.
         let goldens = load_goldens(GOLDEN_PATH);
-        // Memory + TraceSink: the seams exist; their impls (the ringed Tape, the flywheel feed) land
-        // in Stage 2 (svc::memory). `None` today ⇒ no Ring-0 assembly and no distill emit — no-ops.
+        // Memory: the Tape-backed `FileMemory` (canon §11) — the lossless factual register. `assemble`
+        // injects Ring-0 (empty genome soul; persona is a cell concern) + Ring-2 recent turns read
+        // back from the Tape, so working memory persists ACROSS `keel` invocations; the engine appends
+        // each Trace to the Tape post-checkpoint. `TraceSink` (the flywheel feed) stays `None` until Stage 3.
+        let memory: Option<Arc<dyn keel_contracts::Memory>> = Some(Arc::new(FileMemory::new("", TAPE_PATH, 6)));
         let engine = KernelEngine::new(EngineConfig {
             slots,
             router,
             oracle,
             baseline,
             spine,
-            memory: None,
+            memory,
             trace_sink: None,
             default_tier: manifest.router.default_tier.clone(),
             goldens,

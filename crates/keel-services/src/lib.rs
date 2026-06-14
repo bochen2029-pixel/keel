@@ -6,13 +6,17 @@
 //! - **landed:** `router` (the difficulty router — the fusion point, canon §9) · `verifier` (the
 //!   externality layer — pluggable oracle registry + joint-wrong, canon §10, the I5 keystone) ·
 //!   `perception` (the afferent change-gate — dHash/VAD, the cost control that ships with the senses,
-//!   canon §12, `GOLDEN_PERCEPTION` green).
-//! - **next:** `amplify` (best-of-N, ships OFF) · `memory` · `driver` · the perception capture organs.
+//!   canon §12, `GOLDEN_PERCEPTION` green) · `memory` (the persistent self — the Tape-backed
+//!   factual register + Ring-0/Ring-2 assembly, canon §11; minimal first cut, narrative register deferred).
+//! - **next:** `amplify` (best-of-N, ships OFF) · `driver` · the perception capture organs · memory's
+//!   narrative register + retrieval.
 
+pub mod memory;
 pub mod perception;
 pub mod router;
 pub mod verifier;
 
+pub use memory::FileMemory;
 pub use perception::ChangeGate;
 pub use router::DifficultyRouter;
 pub use verifier::{GoldenDispatchOracle, GoldenOracle, PropertyOracle, SchemaOracle, SourceOracle, Verifier};
