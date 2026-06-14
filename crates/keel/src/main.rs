@@ -1,19 +1,20 @@
 //! keel — the daily-driver CLI (L5). The Stage-0 capstone: it assembles the spine from
-//! `keel.lock` (kernel `manifest` → `registry` with a `local_llama` adapter → the invariant
-//! `chain` of audit · privacy · cost), mints a `Context`, runs one prompt through to the real
-//! tier, logs every call to the file ledger, and prints the answer.
+//! `keel.lock` (kernel `manifest` → `registry` with the tier's adapter → the invariant `chain`
+//! of audit · privacy · cost), mints a `Context`, runs one prompt through to the tier, logs every
+//! call to the file ledger, and prints the answer.
 //!
 //!   keel "read me the config"
-//!   keel --think "weigh the tradeoffs"
-//!   keel --manifest C:\KEEL\keel.lock "hello"
+//!   keel --tier cheap-API "weigh the tradeoffs"   # DeepSeek: real cost, I3 egress mask on
+//!   keel --think "..."        keel --manifest C:\KEEL\keel.lock "hello"
 
-use keel_adapters::LocalLlama;
-use keel_contracts::{Content, Effort, GenerateRequest, KeelError, Message, Role};
+use keel_adapters::{DeepSeek, LocalLlama};
+use keel_contracts::{Content, Effort, GenerateRequest, KeelError, Message, ModelTier, Role};
 use keel_kernel::{new_context, Chain, Manifest, Registry};
 use keel_middleware::{AuditMiddleware, AuditSink, CostMiddleware, FileAuditSink, PrivacyMiddleware, Redactor};
 use std::sync::Arc;
 
-const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8080";
+const LOCAL_ENDPOINT: &str = "http://127.0.0.1:8080";
+const DEEPSEEK_ENDPOINT: &str = "https://api.deepseek.com";
 const AUDIT_LEDGER: &str = ".keelstate/audit.jsonl";
 
 #[tokio::main]
@@ -25,46 +26,68 @@ async fn main() {
 }
 
 async fn run() -> keel_contracts::Result<()> {
-    // ── args: keel [--manifest PATH] [--think] <prompt...> ──
+    // ── args: keel [--manifest PATH] [--tier NAME] [--think] <prompt...> ──
     let mut manifest_path = "keel.lock".to_string();
+    let mut tier_override: Option<String> = None;
     let mut think = false;
     let mut prompt = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--manifest" => manifest_path = args.next().unwrap_or_default(),
+            "--tier" => tier_override = args.next(),
             "--think" => think = true,
             _ => prompt.push(a),
         }
     }
     let prompt = prompt.join(" ");
     if prompt.trim().is_empty() {
-        eprintln!("usage: keel [--manifest PATH] [--think] <prompt>");
+        eprintln!("usage: keel [--manifest PATH] [--tier NAME] [--think] <prompt>");
         std::process::exit(2);
     }
 
     // ── assemble the spine from the manifest ──
     let manifest = Manifest::load(&manifest_path)?;
-    let tier_name = manifest.router.default_tier.clone();
+    let tier_name = tier_override.unwrap_or_else(|| manifest.router.default_tier.clone());
     let tcfg = manifest
         .tier(&tier_name)
         .ok_or_else(|| KeelError::Other(format!("no tier '{tier_name}' in {manifest_path}")))?;
-    let endpoint = tcfg.endpoint.clone().unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
 
-    let adapter = Arc::new(
-        LocalLlama::new(endpoint, tcfg.model.clone(), tier_name.clone(), tcfg.price.to_price(), tcfg.vision)
-            .with_max_tokens(2048),
-    );
+    // wiring reads the manifest's adapter name → builds the L2 adapter (the kernel never imports L2)
+    let adapter: Arc<dyn ModelTier> = match tcfg.adapter.as_str() {
+        "local_llama" => {
+            let endpoint = tcfg.endpoint.clone().unwrap_or_else(|| LOCAL_ENDPOINT.to_string());
+            Arc::new(
+                LocalLlama::new(endpoint, tcfg.model.clone(), tier_name.clone(), tcfg.price.to_price(), tcfg.vision)
+                    .with_max_tokens(2048),
+            )
+        }
+        "deepseek" => {
+            let key = tcfg.api_key().ok_or_else(|| {
+                KeelError::Other(format!(
+                    "tier '{tier_name}' needs env var {}",
+                    tcfg.api_key_env.as_deref().unwrap_or("?")
+                ))
+            })?;
+            let endpoint = tcfg.endpoint.clone().unwrap_or_else(|| DEEPSEEK_ENDPOINT.to_string());
+            Arc::new(
+                DeepSeek::new(endpoint, tcfg.model.clone(), tier_name.clone(), tcfg.price.to_price(), key)
+                    .with_max_tokens(2048),
+            )
+        }
+        other => return Err(KeelError::Other(format!("unknown adapter '{other}' for tier '{tier_name}'"))),
+    };
     let mut registry = Registry::new();
     registry.register(tier_name.clone(), adapter);
 
-    // the invariant chain: audit (→ file ledger) · privacy (local ⇒ pass-through) · cost (hard-stop)
+    // the invariant chain: audit (→ ledger) · privacy (cloud tiers ⇒ egress mask) · cost (hard-stop)
+    let egress = tcfg.adapter != "local_llama"; // local is sovereign-safe; cloud tiers get the I3 mask
     let sink: Arc<dyn AuditSink> = Arc::new(
         FileAuditSink::new(AUDIT_LEDGER).map_err(|e| KeelError::Other(format!("ledger {AUDIT_LEDGER}: {e}")))?,
     );
     let chain = Chain::new(vec![
         Arc::new(AuditMiddleware::new(sink)),
-        Arc::new(PrivacyMiddleware::new(Arc::new(Redactor::new(vec![])), false)),
+        Arc::new(PrivacyMiddleware::new(Arc::new(Redactor::new(vec![])), egress)),
         Arc::new(CostMiddleware::new(manifest.cost.hard_stop_at)),
     ]);
 
