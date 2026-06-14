@@ -71,6 +71,18 @@ struct ChatRequest {
     /// KEEL extension: route this turn through the model's thinking mode.
     #[serde(default)]
     think: Option<bool>,
+    /// KEEL extension (I5): this turn's wrong output would corrupt the operator's substrate, so it
+    /// must carry a correctness assertion — a fired `golden_ref` or a domain oracle — or it fails closed.
+    #[serde(default)]
+    critical: Option<bool>,
+    /// KEEL extension (I5): operator-frozen golden-case names this turn asserts against. An unresolved
+    /// name fails closed; a resolved schema/property ref gates by family (the "schema-valid or reject" gate).
+    #[serde(default)]
+    golden_refs: Vec<String>,
+    /// KEEL extension: constrained decode — a GBNF string or a JSON-schema object the local tier
+    /// enforces at decode time (the path that lets a turn emit schema-valid output, then pass via a ref).
+    #[serde(default)]
+    grammar: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -96,6 +108,13 @@ async fn chat(State(st): State<AppState>, Json(body): Json<ChatRequest>) -> impl
         })
         .collect();
 
+    // I5 + constrained-decode extensions — parity with the CLI's --critical/--golden-ref, plus a
+    // `grammar` path serve gets first. Moved out of `body` before the literals; the remaining fields
+    // (kind/sovereign/think) stay readable (disjoint partial move).
+    let critical = body.critical.unwrap_or(false);
+    let golden_refs = body.golden_refs;
+    let grammar = body.grammar;
+
     // The routing Step. Its `content` mirrors the request's modalities, so a request carrying an
     // image routes local by itself (I3, perception is sovereign-by-default) — no caller opt-in.
     let mut step = Step {
@@ -106,16 +125,16 @@ async fn chat(State(st): State<AppState>, Json(body): Json<ChatRequest>) -> impl
         tier_history: vec![],
         oracle_failures: 0,
         projected_cost: None,
-        critical: false,
+        critical,
         source: Some("serve".into()),
         content: messages.iter().flat_map(|m| m.content.clone()).collect(),
-        golden_refs: vec![],
+        golden_refs,
     };
     let req = GenerateRequest {
         messages,
         model: String::new(), // the engine sets the routed tier's model
         tools: vec![],
-        grammar: None,
+        grammar, // constrained decode (GBNF / JSON-schema), enforced by the local tier at decode time
         // default to lean; `think:true` opts into reasoning; otherwise the router decides per tier.
         effort: Effort { n: 1, thinking: if body.think.unwrap_or(false) { Some("high".into()) } else { None } },
         cache_prefix_len: None,
@@ -186,4 +205,34 @@ fn openai_response(outcome: &Outcome, id: &str) -> Value {
             "joint_wrong": outcome.verdict.joint_wrong
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ChatRequest;
+
+    // serve↔CLI parity: the over-protocol request carries the I5 + constrained-decode extensions.
+    #[test]
+    fn parses_i5_and_grammar_extensions() {
+        let body: ChatRequest = serde_json::from_str(
+            r#"{ "messages": [{"role":"user","content":"hi"}],
+                 "kind": "core-wire", "sovereign": true,
+                 "critical": true, "golden_refs": ["dir-schema"],
+                 "grammar": {"type":"object","required":["path"]} }"#,
+        )
+        .unwrap();
+        assert_eq!(body.messages.len(), 1);
+        assert_eq!(body.critical, Some(true));
+        assert_eq!(body.golden_refs, vec!["dir-schema".to_string()]);
+        assert!(body.grammar.is_some());
+    }
+
+    // absent extensions default cleanly — a plain OpenAI request still works (no critical, no refs, no grammar).
+    #[test]
+    fn extensions_default_when_absent() {
+        let body: ChatRequest = serde_json::from_str(r#"{ "messages": [] }"#).unwrap();
+        assert_eq!(body.critical, None);
+        assert!(body.golden_refs.is_empty());
+        assert!(body.grammar.is_none());
+    }
 }
