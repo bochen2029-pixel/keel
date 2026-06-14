@@ -88,11 +88,13 @@ fn forced_local(reason: &str) -> Decision {
     Decision { tier: "local".to_string(), effort: effort_for(0), reason: reason.to_string() }
 }
 
-/// Effort by tier economics (canon §9.3): local is electricity → crank best-of-N; cheap-API leans
-/// on the model; frontier is single-pass. (Best-of-N ships OFF until `amplify` earns it.)
+/// Effort by tier economics (canon §9.3): local is electricity → crank best-of-N and run **lean**
+/// (thinking off — local amplifies by sampling *width*, not by reasoning *depth*, and a bare `None`
+/// would defer to the server's thinking-on default and ramble into empty content); cheap-API leans
+/// on the model's own thinking; frontier is single-pass. (Best-of-N ships OFF until `amplify` earns it.)
 fn effort_for(idx: usize) -> Effort {
     match idx {
-        0 => Effort { n: 8, thinking: None },
+        0 => Effort { n: 8, thinking: Some("low".to_string()) },
         1 => Effort { n: 2, thinking: Some("high".to_string()) },
         _ => Effort { n: 1, thinking: None },
     }

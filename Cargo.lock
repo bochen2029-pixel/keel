@@ -564,6 +564,7 @@ dependencies = [
  "keel-contracts",
  "keel-kernel",
  "keel-middleware",
+ "keel-services",
  "serde",
  "serde_json",
  "tokio",

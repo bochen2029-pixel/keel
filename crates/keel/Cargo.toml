@@ -23,6 +23,7 @@ keel-contracts = { path = "../keel-contracts" }
 keel-kernel = { path = "../keel-kernel" }
 keel-middleware = { path = "../keel-middleware" }
 keel-adapters = { path = "../keel-adapters" }
+keel-services = { path = "../keel-services" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
 axum = "0.8"
 serde = { version = "1", features = ["derive"] }
