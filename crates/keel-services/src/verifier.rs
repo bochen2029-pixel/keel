@@ -18,6 +18,7 @@
 use async_trait::async_trait;
 use keel_contracts::{Assertion, Context, GoldenCase, Oracle, Result, StepOutput, Verdict};
 use regex::Regex;
+use serde_json::Value;
 
 // ── property / metamorphic oracle ─────────────────────────────────────────────
 
@@ -123,6 +124,66 @@ impl Oracle for SourceOracle {
             joint_wrong: false,
             evidence: vec![Assertion { kind: "source".into(), detail: failure }],
         })
+    }
+}
+
+// ── schema-validation oracle ──────────────────────────────────────────────────
+
+/// The schema-validation oracle (canon §10, §17 — the Backrooms Director's "schema-valid Directive
+/// or reject" gate). **Non-model**: it validates the output against a JSON Schema with the
+/// `jsonschema` crate, **in-memory only** (the crate's network/`$ref` features are off, so a
+/// safety-critical oracle never egresses — I3). The instance is `output.artifact` when present, else
+/// `output.content` parsed as JSON. **Any** violation → the verdict fails and lists every violation:
+/// an invalid output is **rejected, never partially applied** (the Director's invariant). A schema
+/// that will not compile **fails closed** — KEEL never blesses what it cannot check (§5).
+pub struct SchemaOracle {
+    schema: Value,
+}
+
+impl SchemaOracle {
+    pub fn new(schema: Value) -> Self {
+        Self { schema }
+    }
+
+    fn reject(detail: String) -> Verdict {
+        Verdict {
+            passed: false,
+            failures: vec![detail.clone()],
+            joint_wrong: false,
+            evidence: vec![Assertion { kind: "schema".into(), detail }],
+        }
+    }
+}
+
+#[async_trait]
+impl Oracle for SchemaOracle {
+    async fn verify(&self, output: &StepOutput, _golden: &[GoldenCase], _ctx: &Context) -> Result<Verdict> {
+        // the instance to check: the structured artifact if present, else parse content as JSON.
+        let instance: Value = if !output.artifact.is_null() {
+            output.artifact.clone()
+        } else {
+            match serde_json::from_str(&output.content) {
+                Ok(v) => v,
+                Err(e) => return Ok(Self::reject(format!("schema: output is not JSON ({e}) — rejected, never partially applied"))),
+            }
+        };
+        // compile the schema; fail closed if it cannot be compiled (cannot assert what it cannot check).
+        let validator = match jsonschema::validator_for(&self.schema) {
+            Ok(v) => v,
+            Err(e) => return Ok(Self::reject(format!("schema: cannot compile schema ({e}) — fail-closed"))),
+        };
+        let failures: Vec<String> = validator.iter_errors(&instance).map(|e| format!("schema: {e}")).collect();
+        if failures.is_empty() {
+            Ok(Verdict {
+                passed: true,
+                failures: Vec::new(),
+                joint_wrong: false,
+                evidence: vec![Assertion { kind: "schema".into(), detail: "output validates against the schema".into() }],
+            })
+        } else {
+            let detail = format!("schema-invalid (rejected, never partially applied): {}", failures.join("; "));
+            Ok(Verdict { passed: false, failures, joint_wrong: false, evidence: vec![Assertion { kind: "schema".into(), detail }] })
+        }
     }
 }
 
@@ -257,5 +318,67 @@ mod tests {
         v.register(Box::new(GoldenOracle));
         let jw = StepOutput { content: "x".into(), artifact: json!({ "self_tests_pass": true, "golden_violated": true }) };
         assert!(v.verify(&jw, &[], &Context::default()).await.unwrap().joint_wrong);
+    }
+
+    /// The Director's gate (canon §17): a conformant Directive validates; a malformed one is
+    /// **rejected, never partially applied.** The rejection case is load-bearing — a validator that
+    /// accepts everything passes the accept-case trivially, so we prove it *catches the bad*.
+    #[tokio::test]
+    async fn schema_oracle_validates_and_rejects() {
+        // a Director-shaped Directive schema: required action(string) + bounded intensity(int 0..10).
+        let schema = json!({
+            "type": "object",
+            "required": ["action", "intensity"],
+            "properties": {
+                "action": { "type": "string" },
+                "intensity": { "type": "integer", "minimum": 0, "maximum": 10 }
+            },
+            "additionalProperties": false
+        });
+        let oracle = SchemaOracle::new(schema);
+        let ctx = Context::default();
+
+        // conformant Directive → accepted
+        let good = StepOutput { content: String::new(), artifact: json!({ "action": "spawn", "intensity": 7 }) };
+        assert!(oracle.verify(&good, &[], &ctx).await.unwrap().passed, "conformant Directive must validate");
+
+        // LOAD-BEARING: malformed — missing required `action` AND wrong-typed `intensity` — must be
+        // REJECTED (invalid, never partially applied), with the violations listed.
+        let bad = StepOutput { content: String::new(), artifact: json!({ "intensity": "high" }) };
+        let v = oracle.verify(&bad, &[], &ctx).await.unwrap();
+        assert!(!v.passed, "malformed Directive must be rejected");
+        assert!(!v.failures.is_empty(), "rejection must list the violations");
+
+        // a value the schema forbids (out-of-range + extra prop) → also rejected
+        let oob = StepOutput { content: String::new(), artifact: json!({ "action": "x", "intensity": 99, "extra": true }) };
+        assert!(!oracle.verify(&oob, &[], &ctx).await.unwrap().passed, "out-of-range / extra-prop must be rejected");
+
+        // content path: non-JSON output with a null artifact → fail-closed (cannot validate ⇒ reject).
+        let nonjson = StepOutput { content: "not json at all".into(), artifact: Value::Null };
+        assert!(!oracle.verify(&nonjson, &[], &ctx).await.unwrap().passed, "non-JSON output fails closed");
+    }
+
+    /// GOLDEN_MODEL_TIER case [1], verify side: the golden's schema validates a conformant tool-call
+    /// (`tool_call_valid_against_schema: true`) and rejects one that violates it. (The decode side —
+    /// schema → llama-server `json_schema` — is asserted in keel-adapters `passes_golden_model_tier`.)
+    #[tokio::test]
+    async fn golden_model_tier_schema_is_enforced() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/golden/golden.json");
+        let raw = std::fs::read_to_string(path).expect("read golden.json");
+        let golden: Value = serde_json::from_str(&raw).expect("parse golden.json");
+        let cases = golden["model_tier"].as_array().expect("model_tier cases");
+        let schema = cases
+            .iter()
+            .find_map(|c| c["input"].get("schema").cloned())
+            .expect("a model_tier case carrying a schema");
+
+        let oracle = SchemaOracle::new(schema);
+        let ctx = Context::default();
+        // conformant to {required:[path], properties:{path:string}} → valid
+        let good = StepOutput { content: String::new(), artifact: json!({ "path": "/etc/hosts" }) };
+        assert!(oracle.verify(&good, &[], &ctx).await.unwrap().passed, "conformant tool-call must validate");
+        // missing required `path` → rejected
+        let bad = StepOutput { content: String::new(), artifact: json!({ "wrong": 1 }) };
+        assert!(!oracle.verify(&bad, &[], &ctx).await.unwrap().passed, "non-conformant tool-call must be rejected");
     }
 }

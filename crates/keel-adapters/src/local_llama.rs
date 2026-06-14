@@ -177,6 +177,82 @@ mod tests {
         assert!(tier().caps().vision);
     }
 
+    /// GOLDEN_MODEL_TIER conformance (model-free; the live model is the `#[ignore]` test below).
+    /// Covers the adapter/cost/decode side of the three frozen cases; the schema *validation* side of
+    /// case [1] (the SchemaOracle) lives in keel-services `golden_model_tier_schema_is_enforced`.
+    #[test]
+    fn passes_golden_model_tier() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/golden/golden.json");
+        let raw = std::fs::read_to_string(path).expect("read golden.json");
+        let golden: Value = serde_json::from_str(&raw).expect("parse golden.json");
+        let cases = golden["model_tier"].as_array().expect("model_tier cases");
+        assert!(!cases.is_empty());
+
+        for case in cases {
+            let name = case["name"].as_str().unwrap_or("?");
+            let input = &case["input"];
+            let expect = &case["expect"];
+
+            // case [0] — cost from usage + price (compute_cost is the non-model arithmetic oracle).
+            if let (Some(u), Some(p)) = (input.get("usage"), input.get("price")) {
+                let usage = keel_contracts::Usage {
+                    input_tokens: u["input_tokens"].as_u64().unwrap_or(0),
+                    output_tokens: u["output_tokens"].as_u64().unwrap_or(0),
+                    cache_hit_tokens: u["cache_hit_tokens"].as_u64().unwrap_or(0),
+                };
+                let price = Price {
+                    input_miss: p["input_miss"].as_f64().unwrap_or(0.0),
+                    input_hit: p["input_hit"].as_f64().unwrap_or(0.0),
+                    output: p["output"].as_f64().unwrap_or(0.0),
+                };
+                let cost = keel_contracts::compute_cost(&usage, &price);
+                let want = expect["cost"].as_f64().expect("expect.cost");
+                let tol = expect["tol"].as_f64().unwrap_or(1e-9);
+                assert!((cost - want).abs() <= tol, "case '{name}': cost {cost} vs {want} (tol {tol})");
+            }
+
+            // case [1] — constrained decode: a JSON schema must reach llama-server's `json_schema`
+            // field (the decode-time constraint). The validation side is the SchemaOracle (services).
+            if let Some(schema) = input.get("schema") {
+                let body = tier()
+                    .build_body(&req_text("call the tool", Effort::default(), Some(schema.clone())))
+                    .unwrap();
+                assert_eq!(&body["json_schema"], schema, "case '{name}': schema must reach the decode constraint");
+                assert!(
+                    expect["tool_call_valid_against_schema"].as_bool().unwrap_or(false),
+                    "case '{name}': golden asserts schema validity"
+                );
+            }
+
+            // case [2] — reasoning_content must survive a tool round-trip (replayed, or providers 400).
+            if input.get("two_turn_thinking").and_then(|v| v.as_bool()).unwrap_or(false) {
+                let assistant = Message {
+                    role: Role::Assistant,
+                    content: vec![Content::Text { text: "partial".into() }],
+                    name: None,
+                    reasoning_content: Some("chain-of-thought".into()),
+                    tool_call_id: None,
+                };
+                let req = GenerateRequest {
+                    messages: vec![assistant],
+                    model: "m".into(),
+                    tools: vec![],
+                    grammar: None,
+                    effort: Effort::default(),
+                    cache_prefix_len: None,
+                };
+                let body = base_body(&req, "m", 256).unwrap();
+                assert_eq!(
+                    body["messages"][0]["reasoning_content"].as_str(),
+                    Some("chain-of-thought"),
+                    "case '{name}': reasoning_content must be replayed (no 400)"
+                );
+                assert!(expect["reasoning_content_preserved"].as_bool().unwrap_or(false));
+                assert!(expect["no_400"].as_bool().unwrap_or(false));
+            }
+        }
+    }
+
     /// Live end-to-end against a running llama-server. Run with:
     ///   cargo test -p keel-adapters -- --ignored
     #[tokio::test]
