@@ -13,7 +13,6 @@ use keel_kernel::{new_context, Chain, Manifest, Registry};
 use keel_middleware::{AuditMiddleware, AuditSink, CostMiddleware, FileAuditSink, PrivacyMiddleware, Redactor};
 use std::sync::Arc;
 
-const LOCAL_ENDPOINT: &str = "http://127.0.0.1:8080";
 const DEEPSEEK_ENDPOINT: &str = "https://api.deepseek.com";
 const AUDIT_LEDGER: &str = ".keelstate/audit.jsonl";
 
@@ -56,7 +55,12 @@ async fn run() -> keel_contracts::Result<()> {
     // wiring reads the manifest's adapter name → builds the L2 adapter (the kernel never imports L2)
     let adapter: Arc<dyn ModelTier> = match tcfg.adapter.as_str() {
         "local_llama" => {
-            let endpoint = tcfg.endpoint.clone().unwrap_or_else(|| LOCAL_ENDPOINT.to_string());
+            // resolve the substrate (c1): an explicit endpoint, else probe the running servers
+            let endpoint = match tcfg.endpoint.clone() {
+                Some(e) => e,
+                None => keel_kernel::resolve_endpoint(&keel_kernel::default_local_candidates())?,
+            };
+            eprintln!("[keel] local substrate → {endpoint}");
             Arc::new(
                 LocalLlama::new(endpoint, tcfg.model.clone(), tier_name.clone(), tcfg.price.to_price(), tcfg.vision)
                     .with_max_tokens(2048),
