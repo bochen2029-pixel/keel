@@ -4,6 +4,7 @@ description = "KEEL L5 — apps: the daily-driver CLI and the OpenAI-compatible 
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+default-run = "keel"
 
 [lib]
 name = "keel"

@@ -3,13 +3,14 @@
 //! (audit → ledger · privacy · cost). The CLI (`keel`) and the OpenAI server (`keel-serve`) both
 //! build on `assemble`, so there is one assembly path, not two.
 
-use keel_adapters::{DeepSeek, LocalLlama};
+use keel_adapters::{Anthropic, DeepSeek, LocalLlama};
 use keel_contracts::{KeelError, ModelTier, Result};
 use keel_kernel::{Chain, Manifest, Registry, TierCfg};
 use keel_middleware::{AuditMiddleware, AuditSink, CostMiddleware, FileAuditSink, PrivacyMiddleware, Redactor};
 use std::sync::Arc;
 
 pub const DEEPSEEK_ENDPOINT: &str = "https://api.deepseek.com";
+pub const ANTHROPIC_ENDPOINT: &str = "https://api.anthropic.com";
 pub const AUDIT_LEDGER: &str = ".keelstate/audit.jsonl";
 // local substrate launch (paths match keel.lock; keel.lock-driven config is a refinement)
 pub const LLAMA_EXE: &str = r"C:\llama.cpp\llama-server.exe";
@@ -52,6 +53,16 @@ pub fn assemble(manifest: &Manifest, tier_override: Option<&str>) -> Result<Asse
             let endpoint = tcfg.endpoint.clone().unwrap_or_else(|| DEEPSEEK_ENDPOINT.to_string());
             Arc::new(
                 DeepSeek::new(endpoint, tcfg.model.clone(), tier_name.clone(), tcfg.price.to_price(), key)
+                    .with_max_tokens(2048),
+            )
+        }
+        "anthropic" => {
+            let key = tcfg.api_key().ok_or_else(|| {
+                KeelError::Other(format!("tier '{tier_name}' needs env var {}", tcfg.api_key_env.as_deref().unwrap_or("?")))
+            })?;
+            let endpoint = tcfg.endpoint.clone().unwrap_or_else(|| ANTHROPIC_ENDPOINT.to_string());
+            Arc::new(
+                Anthropic::new(endpoint, tcfg.model.clone(), tier_name.clone(), tcfg.price.to_price(), key)
                     .with_max_tokens(2048),
             )
         }
