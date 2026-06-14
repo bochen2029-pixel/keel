@@ -1,14 +1,16 @@
 //! deepseek — the cheap-API reasoning tier (canon §4). OpenAI Chat Completions over HTTPS with
-//! DeepSeek's compat specifics: the chat path is `/chat/completions` (no `/v1`); thinking is
-//! `thinking:{type:enabled}` + `reasoning_effort` (vs Qwen's `chat_template_kwargs`); cost is
+//! DeepSeek's compat specifics: the chat path is `/chat/completions` (no `/v1`); thinking is the
+//! `thinking:{type:…}` block + `reasoning_effort` (vs Qwen's `chat_template_kwargs`); cost is
 //! **real money**, computed from usage × price with the prompt-cache-hit lever. It reuses the
 //! shared `openai` mapping wholesale — the payoff of factoring it out.
+//!
+//! Note: `deepseek-v4-pro` defaults to thinking **on**, so the adapter honors `Effort.thinking`
+//! explicitly — lean ⇒ `disabled`, high/max ⇒ `enabled`, unset ⇒ leave the model default.
 
 use crate::openai::{base_body, parse_response, OaiResponse};
 use async_trait::async_trait;
 use keel_contracts::{
-    Capabilities, Context, Effort, GenerateRequest, GenerateResult, KeelError, ModelTier, Price,
-    Result,
+    Capabilities, Context, GenerateRequest, GenerateResult, KeelError, ModelTier, Price, Result,
 };
 use serde_json::{json, Value};
 
@@ -53,19 +55,18 @@ impl DeepSeek {
 
     fn build_body(&self, req: &GenerateRequest) -> Result<Value> {
         let mut body = base_body(req, &self.model, self.max_tokens)?;
-        if let Some(effort) = reasoning_effort(&req.effort) {
-            body.insert("thinking".into(), json!({ "type": "enabled" }));
-            body.insert("reasoning_effort".into(), json!(effort));
+        // v4-pro defaults to thinking ON, so honor Effort explicitly.
+        match req.effort.thinking.as_deref() {
+            Some("low") | Some("off") | Some("none") | Some("no") => {
+                body.insert("thinking".into(), json!({ "type": "disabled" }));
+            }
+            Some(effort) => {
+                body.insert("thinking".into(), json!({ "type": "enabled" }));
+                body.insert("reasoning_effort".into(), json!(effort));
+            }
+            None => {} // leave the model default
         }
         Ok(Value::Object(body))
-    }
-}
-
-/// `Effort.thinking` → DeepSeek `reasoning_effort`. Lean signals (or `None`) ⇒ non-thinking.
-fn reasoning_effort(effort: &Effort) -> Option<&str> {
-    match effort.thinking.as_deref() {
-        Some("low") | Some("off") | Some("none") | Some("no") | None => None,
-        Some(v) => Some(v), // "high" | "max" | …
     }
 }
 
@@ -106,7 +107,7 @@ impl ModelTier for DeepSeek {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use keel_contracts::{Content, Message, Role};
+    use keel_contracts::{Content, Effort, Message, Role};
 
     fn req_text(s: &str, effort: Effort) -> GenerateRequest {
         GenerateRequest {
@@ -141,21 +142,18 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_effort_mapping() {
-        assert_eq!(reasoning_effort(&Effort { n: 1, thinking: Some("high".into()) }), Some("high"));
-        assert_eq!(reasoning_effort(&Effort { n: 1, thinking: Some("low".into()) }), None);
-        assert_eq!(reasoning_effort(&Effort { n: 1, thinking: None }), None);
-    }
-
-    #[test]
-    fn thinking_block_only_when_enabled() {
+    fn thinking_modes() {
         let t = tier();
-        let on = t.build_body(&req_text("x", Effort { n: 1, thinking: Some("high".into()) })).unwrap();
-        assert_eq!(on["thinking"]["type"], "enabled");
-        assert_eq!(on["reasoning_effort"], "high");
-        let off = t.build_body(&req_text("x", Effort::default())).unwrap();
-        assert!(off.get("thinking").is_none());
-        assert!(off.get("reasoning_effort").is_none());
+        let high = t.build_body(&req_text("x", Effort { n: 1, thinking: Some("high".into()) })).unwrap();
+        assert_eq!(high["thinking"]["type"], "enabled");
+        assert_eq!(high["reasoning_effort"], "high");
+
+        let lean = t.build_body(&req_text("x", Effort { n: 1, thinking: Some("low".into()) })).unwrap();
+        assert_eq!(lean["thinking"]["type"], "disabled");
+        assert!(lean.get("reasoning_effort").is_none());
+
+        let unset = t.build_body(&req_text("x", Effort::default())).unwrap();
+        assert!(unset.get("thinking").is_none()); // leave the model default
     }
 
     #[test]
@@ -164,7 +162,7 @@ mod tests {
     }
 
     /// Live against the real DeepSeek API (spends a few tokens of real money). Run with the key in
-    /// env: `cargo test -p keel-adapters deepseek -- --ignored`
+    /// env: `cargo test -p keel-adapters deepseek -- --ignored --nocapture`
     #[tokio::test]
     #[ignore = "hits the real DeepSeek API; needs DEEPSEEK_API_KEY"]
     async fn live_generate() {
@@ -177,19 +175,20 @@ mod tests {
             Price { input_miss: 0.435, input_hit: 0.003625, output: 0.87 },
             key,
         );
+        // thinking=low ⇒ explicit `disabled`; reasoning_content should now be absent/empty.
         let res = t
-            .generate(req_text("Reply with exactly the word: pong", Effort { n: 1, thinking: None }), &Context::default())
+            .generate(req_text("Reply with exactly the word: pong", Effort { n: 1, thinking: Some("low".into()) }), &Context::default())
             .await
             .expect("live deepseek");
         eprintln!(
             "content={:?} reasoning?={} usage={:?} cost=${:.6}",
             res.content,
-            res.reasoning_content.is_some(),
+            res.reasoning_content.as_deref().map(str::trim).filter(|s| !s.is_empty()).is_some(),
             res.usage,
             res.cost
         );
         assert!(!res.content.is_empty());
         assert_eq!(res.tier, "cheap-API");
-        assert!(res.cost > 0.0); // real money — I4 finally bites
+        assert!(res.cost > 0.0);
     }
 }
