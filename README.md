@@ -7,7 +7,23 @@ KEEL is a single-operator substrate — the persistent, sovereign **self** that 
 > The API is rented cognition — stateless, interchangeable, billed per token.
 > **KEEL is the self** — persistent, user-owned, sovereign, portable across providers and across years.
 
-**Status:** spec-first, pre-implementation. The canon is finished the moment it stops being a substitute for a running binary.
+**Status:** in active build — the spine, the three-tier router, and the I5 externality layer are real and running, consumed embedded (CLI) *and* over protocol (`serve_openai`). Stage 2 (correctness & memory) in progress. The canon is finished the moment it stops being a substitute for a running binary; trust `_run_state/STATE.md` + `git` for live state.
+
+---
+
+## Why KEEL exists — the intent
+
+Across project after project (NightClerk, NightScribe, photo2deck, companions, games), its operator kept re-building the **same AI/LLM substrate by hand** — the same local vision-LLM, the same Whisper ears, the same privacy filtering, the same cheap-vs-frontier routing. KEEL builds that common core **once, from first principles, as scale-invariant and reusable as possible** — and never rewrites it. You can't embed OpenCode or Claude Code inside a game or an app; those are agents you *talk to*, not a substrate you *embed*. KEEL is the substrate: **sovereign, custom-coded, local-first, online-API-capable, intelligently routing between them.**
+
+One frozen core, three destinies — differing only by which modules are toggled on:
+
+1. **An embeddable, reusable AI bundle** for the operator's own apps and games — *the .NET of his AI apps*: build an LLM-infused app or game without re-coding the AI piece each time.
+2. **A sovereign personal harness/assistant** — an OpenClaw-class daily-driver, but local-first and grounded by a non-model oracle, not a YOLO cloud agent.
+3. **Aspirationally, the orchestration kernel of an intelligence that can run an entire organization** — the same loop, scaled by slotting in more modules.
+
+The unifying property is **scale-invariance and case-agnosticism**: one deliberately simple, frozen kernel loop + ten frozen contracts that reduce to a game's minimal AI module and extend to an org-scale orchestrator **purely by which modules are slotted — never by rewriting the loop**. That is the genome / stem-cell, and that is the name KEEL.
+
+**Concrete defaults** (chosen, not arbitrary; all swappable via the resolver + `keel.lock`): Qwen3.5-9B (native early-fusion vision) local · Whisper ears · OpenAI Privacy Filter + regex · DeepSeek V4 Pro (cheap-API) · Claude Opus 4.8 (frontier) · Qwen3-0.6B embedder/reranker · SQLite index · MCP first-class. *(Rust today; a native C/C++ port is a contemplated future — the language-neutral frozen golden cases make it a re-pass-the-same-goldens exercise, so the language is the most reversible decision in the system.)*
 
 ---
 
