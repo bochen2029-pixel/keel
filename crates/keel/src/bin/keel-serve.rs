@@ -98,7 +98,7 @@ async fn chat(State(st): State<AppState>, Json(body): Json<ChatRequest>) -> impl
 
     // The routing Step. Its `content` mirrors the request's modalities, so a request carrying an
     // image routes local by itself (I3, perception is sovereign-by-default) — no caller opt-in.
-    let step = Step {
+    let mut step = Step {
         kind: if matches!(body.kind.as_deref(), Some("core-wire") | Some("core_wire")) { Kind::CoreWire } else { Kind::Scaffolding },
         ty: "api_turn".into(),
         trust_required: Trust::Normal,
@@ -121,8 +121,8 @@ async fn chat(State(st): State<AppState>, Json(body): Json<ChatRequest>) -> impl
         cache_prefix_len: None,
     };
 
-    let ctx = new_context(&st.manifest);
-    match st.engine.run(&step, &ctx, req).await {
+    let mut ctx = new_context(&st.manifest);
+    match st.engine.run(&mut step, &mut ctx, req).await {
         Ok(outcome) => Json(openai_response(&outcome, &ctx.trace_id)).into_response(),
         Err(e) => {
             let code = if e.code() == "BUDGET_EXCEEDED" { StatusCode::PAYMENT_REQUIRED } else { StatusCode::BAD_GATEWAY };
@@ -181,7 +181,9 @@ fn openai_response(outcome: &Outcome, id: &str) -> Value {
             "cost": res.cost,
             "route": outcome.decision.reason,
             "requested_tier": outcome.decision.tier,
-            "substituted": outcome.substituted
+            "substituted": outcome.substituted,
+            "verdict_passed": outcome.verdict.passed,
+            "joint_wrong": outcome.verdict.joint_wrong
         }
     })
 }

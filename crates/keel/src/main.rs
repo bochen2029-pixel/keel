@@ -45,7 +45,7 @@ async fn run() -> keel_contracts::Result<()> {
     }
 
     let manifest = Manifest::load(&manifest_path)?;
-    let ctx = new_context(&manifest);
+    let mut ctx = new_context(&manifest);
     let user = Message {
         role: Role::User,
         content: vec![Content::Text { text: prompt.clone() }],
@@ -70,7 +70,7 @@ async fn run() -> keel_contracts::Result<()> {
     } else {
         // ── self-driving: the router picks the tier for this turn ──
         let engine = keel::Engine::assemble(&manifest)?;
-        let step = Step {
+        let mut step = Step {
             kind: if core_wire { Kind::CoreWire } else { Kind::Scaffolding },
             ty: "user_turn".into(),
             trust_required: Trust::Normal,
@@ -92,12 +92,18 @@ async fn run() -> keel_contracts::Result<()> {
             effort: Effort { n: 1, thinking: if think { Some("high".into()) } else { None } },
             cache_prefix_len: None,
         };
-        let outcome = engine.run(&step, &ctx, req).await?;
+        let outcome = engine.run(&mut step, &mut ctx, req).await?;
         let mut note = outcome.decision.reason.clone();
         if outcome.substituted {
             note = format!("{note} — chosen tier '{}' unavailable, fell back to '{}'", outcome.decision.tier, outcome.tier_used);
         }
         report(&outcome.result, &ctx, &note, think);
+        // I5 surfaced: quiet on a passed (incl. vacuous) verdict; loud on a real oracle failure.
+        if outcome.verdict.joint_wrong {
+            eprintln!("[keel] ⚠ JOINT_WRONG — {}", outcome.verdict.failures.join("; "));
+        } else if !outcome.verdict.passed {
+            eprintln!("[keel] ⚠ verify failed — {}", outcome.verdict.failures.join("; "));
+        }
     }
     Ok(())
 }

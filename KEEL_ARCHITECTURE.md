@@ -228,6 +228,8 @@ This is the self-sustaining cycle: **route → amplify → verify (externally) �
 
 `amplify?` is optional and ships disabled: best-of-N + verifier-selection is the one genome capability the other six systems did *not* independently rediscover (they bought reliability with trained weights and oracle gates), so it earns its place only by passing the §23 amplification falsifier — never by assumption.
 
+> **Implementation note (I3 — per-tier chains).** The single `chain` above is illustrative. Because the privacy mask (I3) differs by destination — `local` stays on the box (pass-through) while every cloud tier is scrubbed before egress — the engine holds **one egress-correct chain per tier** and runs the routed tier through *its* chain, not one shared chain with a static flag. The loop shape is unchanged; `chain` is resolved per `Decision.tier`.
+
 ---
 
 ## §9 · The Router (the fusion point — the single most important module)

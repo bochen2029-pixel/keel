@@ -13,7 +13,7 @@ The persistent, sovereign **self** that perceives (eyes + ears), remembers, rout
 - Repo `C:\KEEL\`. Rust stable `x86_64-pc-windows-msvc`, edition 2021. **Build/test from a native MSVC dev shell (PowerShell)**, not git-bash.
 - **Known toolchain issue — resolve before Stage 0:** `rustc` can't find `std`/`core` for the host target (E0463) though `rustup` reports `rust-std` installed/up-to-date — a missing/corrupt std rlib on disk. Fix: `rustup toolchain install stable-x86_64-pc-windows-msvc --force` (or `rustup update stable`). **Operator-gated** (it touches the global toolchain DAVE/TERMINAL share). `cargo check` must pass before any Stage-0 slice is "done."
 - Substrate (resolved, not embedded — canon §13): `C:\llama.cpp` (llama-server), `C:\models` (Qwen3.5-9B-Q5_K_M + `mmproj-F16`, whisper `large-v3-turbo`, the OpenAI privacy-filter), `C:\whisper.cpp`. Cloud keys (`DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY`) live in env; the operator rotates them — **never hardcode or commit a key.**
-- **Reference bench:** Marrow-L1 (Python, green, golden-tested) at `C:\loom\marrow-l1` is the executable oracle the Rust core diffs against (the ASTRA-textverse pattern). Don't port its code — diff against its behavior + the goldens.
+- **Reference bench (read-only):** Marrow-L1 (Python, green, golden-tested) at `C:\loom\marrow-l1` is a **read-only behavior reference / diff-oracle — never a build or runtime dependency.** KEEL ships nothing of Marrow's and links nothing from it; this is how the "self-contained" directive and the bench reference reconcile (diff against its *behavior* + the goldens — the ASTRA-textverse pattern — don't port its code).
 
 ## Non-negotiable rules
 1. **The canon is the source of truth** (`KEEL_ARCHITECTURE.md`). When code and canon disagree, fix the wrong one **in the same change**. Never let them drift.
@@ -32,10 +32,14 @@ The persistent, sovereign **self** that perceives (eyes + ears), remembers, rout
 - Any action whose undo cost you can't state in one sentence → **stop and ask.**
 
 ## Build state
+*(Summary only — the live, authoritative per-slice anchor is `_run_state/STATE.md`. Trust STATE.md + `git`, never this block, for current state.)*
 - **Canon:** v0.2 adopted; patched with embedder/reranker + the privacy three-rung; ADR #5 = native Rust.
-- **L0 contracts:** written (`crates/keel-contracts` — the ten joints + types + the §18 error taxonomy). **Compile-pending the toolchain fix above** (the failure is in dependency build scripts, not KEEL code).
-- **Golden cases:** PROPOSED in `tests/golden/golden.json` — awaiting operator ratification, then freeze (operator action).
-- **Next:** Stage 0 (the spine). Nothing above L0 exists yet.
+- **L0 contracts:** the ten joints + types + the §18 error taxonomy — frozen, green (rustc 1.96, MSVC).
+- **Golden cases:** RATIFIED + FROZEN (`tests/golden/golden.json` + `.frozen.json`, 21 cases / 6 families) — agent read-only. The KEEL-native freeze-gate is built but `#[ignore]`-dormant pending the operator's one-time re-stamp.
+- **Stage 0 (spine):** complete — three-tier economy (local · cheap-API · frontier) through one invariant chain, file ledger + SQLite Spine (I2), self-resolving substrate, consumable embedded (CLI) **and** over protocol (`serve_openai`).
+- **Stage 1:** `DifficultyRouter` (GOLDEN_ROUTER ✓) + the self-driving engine landed.
+- **Stage 2 (in progress):** `svc::verifier` (I5, GOLDEN_ORACLE ✓) landed and **wired into the running loop** via `kernel::engine` (L1: route → chain → verify → checkpoint → emit). Still ahead: `svc::memory`, `mw::metrics`, privacy rung-3.
+- **Next:** see `_run_state/STATE.md`.
 
 ## Session protocol
 1. Load the canon + this file.

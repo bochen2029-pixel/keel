@@ -172,6 +172,18 @@ impl Verifier {
     }
 }
 
+/// The registry is itself an [`Oracle`] (a composite): registering N oracles and folding their
+/// verdicts is exactly the `Oracle` contract at a coarser grain. This lets `kernel::engine` hold a
+/// single `&dyn Oracle` for the whole I5 surface while a cell composes many behind it — a pure L4
+/// addition (zero contract edit). The inherent [`Verifier::verify`] is the implementation; this just
+/// exposes it through the frozen joint.
+#[async_trait]
+impl Oracle for Verifier {
+    async fn verify(&self, output: &StepOutput, golden: &[GoldenCase], ctx: &Context) -> Result<Verdict> {
+        Verifier::verify(self, output, golden, ctx).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
