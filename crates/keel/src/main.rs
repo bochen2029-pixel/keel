@@ -26,6 +26,8 @@ async fn run() -> keel_contracts::Result<()> {
     let mut think = false;
     let mut core_wire = false;
     let mut sovereign = false;
+    let mut critical = false;
+    let mut golden_refs: Vec<String> = Vec::new();
     let mut prompt = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -34,13 +36,19 @@ async fn run() -> keel_contracts::Result<()> {
             "--tier" => tier_override = args.next(),
             "--kind" => core_wire = matches!(args.next().as_deref(), Some("core-wire") | Some("core_wire")),
             "--sovereign" => sovereign = true,
+            "--critical" => critical = true,
+            "--golden-ref" => {
+                if let Some(n) = args.next() {
+                    golden_refs.push(n);
+                }
+            }
             "--think" => think = true,
             _ => prompt.push(a),
         }
     }
     let prompt = prompt.join(" ");
     if prompt.trim().is_empty() {
-        eprintln!("usage: keel [--manifest PATH] [--tier NAME] [--kind core-wire] [--sovereign] [--think] <prompt>");
+        eprintln!("usage: keel [--manifest PATH] [--tier NAME] [--kind core-wire] [--sovereign] [--critical] [--golden-ref NAME] [--think] <prompt>");
         std::process::exit(2);
     }
 
@@ -78,10 +86,10 @@ async fn run() -> keel_contracts::Result<()> {
             tier_history: vec![],
             oracle_failures: 0,
             projected_cost: None,
-            critical: false,
+            critical,
             source: Some("cli".into()),
             content: vec![Content::Text { text: prompt.clone() }],
-            golden_refs: vec![],
+            golden_refs,
         };
         let req = GenerateRequest {
             messages: vec![user],

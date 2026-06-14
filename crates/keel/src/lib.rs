@@ -16,14 +16,14 @@
 
 use keel_adapters::{Anthropic, DeepSeek, LocalLlama};
 use keel_contracts::{
-    Context, GenerateRequest, GenerateResult, KeelError, ModelTier, Oracle, Result, Router, Spine, Step,
+    Context, GenerateRequest, GenerateResult, GoldenCase, KeelError, ModelTier, Oracle, Result, Router, Spine, Step,
 };
-use keel_kernel::engine::{Engine as KernelEngine, TierSlot};
+use keel_kernel::engine::{Engine as KernelEngine, EngineConfig, TierSlot};
 use keel_kernel::{Chain, Manifest, Registry, TierCfg};
 use keel_middleware::{AuditMiddleware, AuditSink, CostMiddleware, FileAuditSink, PrivacyMiddleware, Redactor};
-use keel_services::{DifficultyRouter, Verifier};
+use keel_services::{DifficultyRouter, PropertyOracle, Verifier};
 use keel_store::SqliteStore;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 /// The outcome of a routed, verified turn (defined in the kernel; re-exported for app callers).
@@ -34,6 +34,9 @@ pub const ANTHROPIC_ENDPOINT: &str = "https://api.anthropic.com";
 pub const AUDIT_LEDGER: &str = ".keelstate/audit.jsonl";
 /// The SQLite index backing the I2 `Spine` (derived/rebuildable; the file ledger is the record).
 pub const INDEX_DB: &str = ".keelstate/index.db";
+/// Operator-frozen ground truth the engine resolves `step.golden_refs` against (read-only). KEEL's
+/// own conformance set; a cell points the registry at its own goldens instead.
+pub const GOLDEN_PATH: &str = "tests/golden/golden.json";
 // local substrate launch (paths match keel.lock; keel.lock-driven config is a refinement)
 pub const LLAMA_EXE: &str = r"C:\llama.cpp\llama-server.exe";
 pub const LLAMA_MODEL: &str = r"C:\models\Qwen3.5-9B-Q5_K_M.gguf";
@@ -83,25 +86,33 @@ impl Engine {
         eprintln!("[keel] engine wired: {:?}", slots.keys().collect::<Vec<_>>());
 
         let router: Box<dyn Router> = Box::new(DifficultyRouter::new(manifest.router.escalate_after_oracle_failures));
-        // I5: the externality registry as a single composite Oracle. Empty by default — a cell
-        // registers its oracles; an empty registry verifies vacuously, so the *mechanism* is live
-        // (oracle_failures feeds the escalation ladder) even before a cell plugs its assertions in.
-        let oracle: Arc<dyn Oracle> = Arc::new(Verifier::new());
+        // I5: the externality registry as a composite Oracle, with the **default-oracle set** — a
+        // baseline non-model assertion on every output (no SSN-shaped span). A cell registers more
+        // (e.g., a `SchemaOracle` for the Director's Directive). The baseline means a critical turn
+        // always carries an assertion; the engine's critical-step guard catches an empty set anyway.
+        let mut verifier = Verifier::new();
+        verifier.register(Box::new(PropertyOracle::new(vec!["no_ssn_pattern".into()])));
+        let oracle: Arc<dyn Oracle> = Arc::new(verifier);
         // I2: the SQLite index is the first Spine. The append-only file ledger stays the system of
         // record; this index is derived and rebuildable from it. (.keelstate is created by the sink.)
         let spine: Arc<dyn Spine> =
             Arc::new(SqliteStore::open(INDEX_DB).map_err(|e| KeelError::Other(format!("index {INDEX_DB}: {e}")))?);
+        // I5 golden registry: resolve `step.golden_refs` against operator-frozen ground truth
+        // (read-only, best-effort from golden.json; a cell injects its own). Empty if the file is
+        // absent — a plain chat turn carries no refs, so the fail-closed guard only bites a ref'd step.
+        let goldens = load_goldens(GOLDEN_PATH);
         // Memory + TraceSink: the seams exist; their impls (the ringed Tape, the flywheel feed) land
         // in Stage 2 (svc::memory). `None` today ⇒ no Ring-0 assembly and no distill emit — no-ops.
-        let engine = KernelEngine::new(
+        let engine = KernelEngine::new(EngineConfig {
             slots,
             router,
             oracle,
             spine,
-            None,
-            None,
-            manifest.router.default_tier.clone(),
-        )?;
+            memory: None,
+            trace_sink: None,
+            default_tier: manifest.router.default_tier.clone(),
+            goldens,
+        })?;
         Ok(Engine(engine))
     }
 
@@ -230,4 +241,27 @@ fn resolve_local_endpoint(tcfg: &TierCfg) -> Result<String> {
             Ok(ep) // handle drops here; the process keeps running (detached for reuse)
         }
     }
+}
+
+/// Load operator-frozen ground truth into a name→case map for the engine's `golden_refs` resolver.
+/// **Read-only**, best-effort: a missing/unparseable file yields an empty map (a plain chat turn
+/// carries no refs, so the engine's fail-closed guard only bites a step that *names* a golden). The
+/// flat sections of `golden.json` (every key but `_meta`) are merged by case `name`.
+fn load_goldens(path: &str) -> HashMap<String, GoldenCase> {
+    let mut map = HashMap::new();
+    let Ok(raw) = std::fs::read_to_string(path) else { return map };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) else { return map };
+    let Some(obj) = json.as_object() else { return map };
+    for (section, cases) in obj {
+        if section == "_meta" {
+            continue;
+        }
+        let Some(arr) = cases.as_array() else { continue };
+        for case in arr {
+            if let Ok(gc) = serde_json::from_value::<GoldenCase>(case.clone()) {
+                map.insert(gc.name.clone(), gc);
+            }
+        }
+    }
+    map
 }

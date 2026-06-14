@@ -4,26 +4,33 @@
 //! and still inherit the invariants, because the invariants live in the *chain* and the *spine*, not
 //! here. This engine is **injection-only**: it imports nothing but L0 (`keel-contracts`) and its own
 //! kernel modules, and is handed the concrete policies — the `Router`, the I5 `Oracle`, the I2
-//! `Spine`, and optionally `Memory`/`TraceSink` — as L0 trait objects by the wiring layer (L5). The
-//! same dyn-injection the [`Registry`](crate::Registry) uses for `ModelTier`, applied to the loop.
+//! `Spine`, optionally `Memory`/`TraceSink`, and the operator-frozen golden registry — as L0 trait
+//! objects + data via [`EngineConfig`]. The same dyn-injection the [`Registry`](crate::Registry)
+//! uses for `ModelTier`, applied to the loop.
 //!
 //! One turn (canon §8): **assemble → route → chain → verify → checkpoint → emit.** The engine **owns
 //! the [`Context`]** (it folds in `result.cost` after the chain returns — I4 — because the chain only
 //! sees `&Context`) and the [`Step`]'s history (it appends `tier_history` and bumps `oracle_failures`
-//! on an oracle failure), so the escalation ladder (canon §9) fires across turns. Verification (I5)
-//! is *recorded and surfaced* on the verdict; in-turn re-escalate-and-retry is a deliberate
-//! follow-up — escalation is realized on the **next** turn via the persisted history.
+//! on a failure), so the escalation ladder (canon §9) fires across turns.
+//!
+//! **I5 teeth (canon §8/§10):** the loop resolves `step.golden_refs` against the injected registry
+//! and verifies against the resolved cases. Two guards keep "vacuous on a plain chat turn" *safe*:
+//! (a) an **unresolved** `golden_ref` → **fail-closed** (a named-but-missing assertion is a hole,
+//! never a vacuous pass); (b) a **`critical`** step with **no effective assertion** (empty verdict
+//! evidence) → **config fault**, never a silent pass. A non-critical, no-ref turn still passes
+//! silently — the teeth bite on critical/ref'd work, not on plain chat.
 //!
 //! **Per-tier chains (I3, canon §8 footnote):** the privacy mask differs by destination, so the
 //! engine holds one egress-correct [`Chain`] per tier and runs the routed tier through *its* chain.
 
 use crate::Chain;
 use keel_contracts::{
-    Content, Context, Decision, Effort, GenerateRequest, GenerateResult, KeelError, Memory, Message,
-    ModelTier, Oracle, Result, Role, Router, Spine, Step, StepOutput, Trace, TraceSink, Verdict, VerifiedTrace,
+    Assertion, Content, Context, Decision, Effort, GenerateRequest, GenerateResult, GoldenCase, KeelError,
+    Memory, Message, ModelTier, Oracle, Result, Role, Router, Spine, Step, StepOutput, Trace, TraceSink,
+    Verdict, VerifiedTrace,
 };
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 /// The tier ladder, cheapest first — the engine walks DOWN it to substitute an available tier when
@@ -37,6 +44,23 @@ pub struct TierSlot {
     pub tier: Arc<dyn ModelTier>,
     pub chain: Chain,
     pub model: String,
+}
+
+/// Everything the engine is injected with (canon §6 — the wiring layer builds the concrete services
+/// and hands them in as L0 trait objects + data). A config struct rather than a long argument list,
+/// so new seams (`Memory`, `TraceSink`, `goldens`, …) don't churn the constructor signature.
+pub struct EngineConfig {
+    pub slots: BTreeMap<String, TierSlot>,
+    pub router: Box<dyn Router>,
+    pub oracle: Arc<dyn Oracle>,
+    pub spine: Arc<dyn Spine>,
+    pub memory: Option<Arc<dyn Memory>>,
+    pub trace_sink: Option<Arc<dyn TraceSink>>,
+    pub default_tier: String,
+    /// Operator-frozen ground truth keyed by case name; the loop resolves `step.golden_refs` against
+    /// it. **Read-only at runtime** — populated from `golden.json` / a cell's goldens by the wiring
+    /// layer (the engine never writes it).
+    pub goldens: HashMap<String, GoldenCase>,
 }
 
 /// The outcome of one routed, verified turn: the model output plus the routing + externality story
@@ -65,28 +89,22 @@ pub struct Engine {
     memory: Option<Arc<dyn Memory>>,
     trace_sink: Option<Arc<dyn TraceSink>>,
     default_tier: String,
+    goldens: HashMap<String, GoldenCase>,
 }
 
 impl Engine {
-    /// Inject the wired tiers + the joints. The wiring layer (L5) builds the concrete services
-    /// (`DifficultyRouter`, the `Verifier` as a composite `Oracle`, the SQLite `Spine`, …) and hands
-    /// them in as L0 trait objects — the kernel imports none of them (the layer rule, canon §6).
-    /// Errors if no tier is wired (`SUBSTRATE_UNRESOLVED`).
-    pub fn new(
-        slots: BTreeMap<String, TierSlot>,
-        router: Box<dyn Router>,
-        oracle: Arc<dyn Oracle>,
-        spine: Arc<dyn Spine>,
-        memory: Option<Arc<dyn Memory>>,
-        trace_sink: Option<Arc<dyn TraceSink>>,
-        default_tier: String,
-    ) -> Result<Engine> {
-        if slots.is_empty() {
+    /// Build the engine from an [`EngineConfig`]. The wiring layer (L5) constructs the concrete
+    /// services (`DifficultyRouter`, the `Verifier` as a composite `Oracle`, the SQLite `Spine`, the
+    /// golden registry, …) and hands them in as L0 trait objects — the kernel imports none of them
+    /// (the layer rule, canon §6). Errors if no tier is wired (`SUBSTRATE_UNRESOLVED`).
+    pub fn new(config: EngineConfig) -> Result<Engine> {
+        if config.slots.is_empty() {
             return Err(KeelError::SubstrateUnresolved(
                 "engine: no tier wired (local substrate down and no cloud keys)".into(),
             ));
         }
-        Ok(Engine { slots, router, oracle, spine, memory, trace_sink, default_tier })
+        let EngineConfig { slots, router, oracle, spine, memory, trace_sink, default_tier, goldens } = config;
+        Ok(Engine { slots, router, oracle, spine, memory, trace_sink, default_tier, goldens })
     }
 
     /// The tiers actually wired (sorted).
@@ -94,9 +112,9 @@ impl Engine {
         self.slots.keys().cloned().collect()
     }
 
-    /// Run one turn of the canonical loop. Mutates `step` (history/failures feedback) and `ctx`
-    /// (cost accumulation) — the engine owns both. Honors `BLOCK` (I4 → `BudgetExceeded`); falls
-    /// back DOWN the ladder when the routed tier is unplugged (local is always present).
+    /// Run one turn of the canonical loop. Mutates `step` (history/failure feedback) and `ctx` (cost
+    /// accumulation) — the engine owns both. Honors `BLOCK` (I4 → `BudgetExceeded`); falls back DOWN
+    /// the ladder when the routed tier is unplugged (local is always present).
     pub async fn run(&self, step: &mut Step, ctx: &mut Context, mut req: GenerateRequest) -> Result<Outcome> {
         // (1) assemble — Ring-0 soul → system message. The seam only; full ring assembly is
         //     `svc::memory` (Stage 2). A `None` memory (today) is a no-op.
@@ -140,20 +158,50 @@ impl Engine {
         //     post-call total, so a multi-call turn (escalation) sees accumulated spend.
         ctx.cost.add(&result.tier, result.cost);
 
-        // (5) verify (I5) — a non-model assertion. The `golden_refs`→`GoldenCase` resolver is a
-        //     Stage-2 runtime golden-registry seam; for now the registry runs its registered
-        //     (property / source / joint-wrong) oracles. An empty registry passes vacuously, so the
-        //     *mechanism* is live even before a cell plugs in its assertions.
-        let output = StepOutput { content: result.content.clone(), artifact: Value::Null };
-        let verdict = self.oracle.verify(&output, &[], ctx).await?;
+        // (5) resolve the step's golden_refs against the injected registry (I5). An unresolved ref is
+        //     a MISSING ASSERTION — tracked here and failed-closed below (a step that names ground
+        //     truth we cannot supply must never verify vacuously).
+        let mut golden_cases = Vec::new();
+        let mut missing = Vec::new();
+        for name in &step.golden_refs {
+            match self.goldens.get(name) {
+                Some(gc) => golden_cases.push(gc.clone()),
+                None => missing.push(name.clone()),
+            }
+        }
 
-        // (6) feed the verdict back onto the Step so the next route can escalate (canon §9).
+        // (6) verify (I5) against the resolved cases — a non-model assertion.
+        let output = StepOutput { content: result.content.clone(), artifact: Value::Null };
+        let mut verdict = self.oracle.verify(&output, &golden_cases, ctx).await?;
+
+        // (6a) fail-closed on any unresolved golden_ref (hardening): a named-but-missing assertion is
+        //      a hole, surfaced to the operator — never a vacuous pass.
+        if !missing.is_empty() {
+            verdict.passed = false;
+            let detail = format!("unresolved golden_ref(s) {missing:?} — missing assertion, fail-closed (→ operator)");
+            verdict.failures.push(detail.clone());
+            verdict.evidence.push(Assertion { kind: "golden_ref".into(), detail });
+        }
+
+        // (6b) a CRITICAL step with no effective assertion is a config fault, not a vacuous pass
+        //      (canon §8/§10). `verdict.evidence` is empty exactly when no oracle applied to this step
+        //      (an empty registry, or a non-empty one where none was applicable) — for a critical step
+        //      that is a hole, never a pass. (A non-critical no-ref turn still passes silently.)
+        if step.critical && verdict.evidence.is_empty() {
+            verdict.passed = false;
+            let detail =
+                "critical step with no applicable oracle — config fault (canon §8/§10), not a vacuous pass".to_string();
+            verdict.failures.push(detail.clone());
+            verdict.evidence.push(Assertion { kind: "critical".into(), detail });
+        }
+
+        // (7) feed the verdict back onto the Step so the next route can escalate (canon §9).
         step.tier_history.push(tier_used.clone());
         if !verdict.passed {
             step.oracle_failures = step.oracle_failures.saturating_add(1);
         }
 
-        // (7) checkpoint the run-state (I2) — the `Trace` is the durable unit (the index; the file
+        // (8) checkpoint the run-state (I2) — the `Trace` is the durable unit (the index; the file
         //     ledger remains the system of record).
         let trace = Trace {
             step: step.clone(),
@@ -164,7 +212,7 @@ impl Engine {
         let state = serde_json::to_value(&trace).map_err(|e| KeelError::Other(format!("trace encode: {e}")))?;
         self.spine.checkpoint(&ctx.trace_id, &state).await?;
 
-        // (8) a passed verdict is flywheel feedstock (the sink scrubs secrets before distill, §5).
+        // (9) a passed verdict is flywheel feedstock (the sink scrubs secrets before distill, §5).
         if verdict.passed {
             if let Some(sink) = &self.trace_sink {
                 sink.emit(VerifiedTrace { trace }).await?;
@@ -210,7 +258,8 @@ impl Engine {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use keel_contracts::{AssembledContext, Capabilities, DataClass, GoldenCase, Kind, RunId, State, Trust};
+    use keel_contracts::{AssembledContext, Capabilities, DataClass, Kind, RunId, State, Trust};
+    use serde_json::json;
     use std::sync::Mutex;
 
     // ── stub tiers / joints — all model-free; the engine *wiring* is what's under test ──
@@ -249,6 +298,7 @@ mod tests {
         }
     }
 
+    /// Passes with **no evidence** (the vacuous case — an empty effective oracle set).
     struct PassOracle;
     #[async_trait]
     impl Oracle for PassOracle {
@@ -256,11 +306,24 @@ mod tests {
             Ok(Verdict { passed: true, ..Default::default() })
         }
     }
+    /// Passes **with** an assertion (a real oracle actually applied to the step).
+    struct EvidenceOracle;
+    #[async_trait]
+    impl Oracle for EvidenceOracle {
+        async fn verify(&self, _o: &StepOutput, _g: &[GoldenCase], _c: &Context) -> Result<Verdict> {
+            Ok(Verdict {
+                passed: true,
+                failures: Vec::new(),
+                joint_wrong: false,
+                evidence: vec![Assertion { kind: "stub".into(), detail: "asserted".into() }],
+            })
+        }
+    }
     struct FailOracle;
     #[async_trait]
     impl Oracle for FailOracle {
         async fn verify(&self, _o: &StepOutput, _g: &[GoldenCase], _c: &Context) -> Result<Verdict> {
-            Ok(Verdict { passed: false, failures: vec!["nope".into()], ..Default::default() })
+            Ok(Verdict { passed: false, failures: vec!["nope".into()], joint_wrong: false, evidence: vec![Assertion { kind: "stub".into(), detail: "failed".into() }] })
         }
     }
 
@@ -343,21 +406,40 @@ mod tests {
     fn echo(cost: f64) -> Arc<EchoTier> {
         Arc::new(EchoTier { cost, seen: Arc::new(Mutex::new(vec![])) })
     }
+    /// Build an engine with an empty golden registry (the common case for these tests).
+    fn engine_with(
+        slots: BTreeMap<String, TierSlot>,
+        router: Box<dyn Router>,
+        oracle: Arc<dyn Oracle>,
+        spine: Arc<dyn Spine>,
+        memory: Option<Arc<dyn Memory>>,
+        trace_sink: Option<Arc<dyn TraceSink>>,
+    ) -> Engine {
+        Engine::new(EngineConfig {
+            slots,
+            router,
+            oracle,
+            spine,
+            memory,
+            trace_sink,
+            default_tier: "local".into(),
+            goldens: HashMap::new(),
+        })
+        .unwrap()
+    }
 
     #[tokio::test]
     async fn passing_turn_folds_cost_checkpoints_and_emits() {
         let spine = Arc::new(RecSpine::default());
         let sink = Arc::new(RecSink::default());
-        let engine = Engine::new(
+        let engine = engine_with(
             one_local(echo(0.25)),
             Box::new(FixedRouter("local")),
-            Arc::new(PassOracle),
+            Arc::new(EvidenceOracle),
             spine.clone(),
             None,
             Some(sink.clone()),
-            "local".into(),
-        )
-        .unwrap();
+        );
 
         let mut s = step();
         let mut c = ctx();
@@ -377,16 +459,14 @@ mod tests {
     async fn failing_oracle_bumps_failures_and_skips_emit() {
         let spine = Arc::new(RecSpine::default());
         let sink = Arc::new(RecSink::default());
-        let engine = Engine::new(
+        let engine = engine_with(
             one_local(echo(0.0)),
             Box::new(FixedRouter("local")),
             Arc::new(FailOracle),
             spine.clone(),
             None,
             Some(sink.clone()),
-            "local".into(),
-        )
-        .unwrap();
+        );
 
         let mut s = step();
         let out = engine.run(&mut s, &mut ctx(), req()).await.unwrap();
@@ -399,16 +479,14 @@ mod tests {
 
     #[tokio::test]
     async fn cost_accumulates_across_turns() {
-        let engine = Engine::new(
+        let engine = engine_with(
             one_local(echo(0.1)),
             Box::new(FixedRouter("local")),
-            Arc::new(PassOracle),
+            Arc::new(EvidenceOracle),
             Arc::new(RecSpine::default()),
             None,
             None,
-            "local".into(),
-        )
-        .unwrap();
+        );
         let mut s = step();
         let mut c = ctx();
         engine.run(&mut s, &mut c, req()).await.unwrap();
@@ -421,16 +499,14 @@ mod tests {
     async fn memory_prepends_ring0_system() {
         let echo = echo(0.0);
         let seen = echo.seen.clone();
-        let engine = Engine::new(
+        let engine = engine_with(
             one_local(echo),
             Box::new(FixedRouter("local")),
-            Arc::new(PassOracle),
+            Arc::new(EvidenceOracle),
             Arc::new(RecSpine::default()),
             Some(Arc::new(SoulMemory)),
             None,
-            "local".into(),
-        )
-        .unwrap();
+        );
         engine.run(&mut step(), &mut ctx(), req()).await.unwrap();
         let msgs = seen.lock().unwrap();
         assert_eq!(msgs.len(), 1);
@@ -440,16 +516,14 @@ mod tests {
 
     #[tokio::test]
     async fn block_decision_is_budget_exceeded() {
-        let engine = Engine::new(
+        let engine = engine_with(
             one_local(echo(0.0)),
             Box::new(FixedRouter("BLOCK")),
             Arc::new(PassOracle),
             Arc::new(RecSpine::default()),
             None,
             None,
-            "local".into(),
-        )
-        .unwrap();
+        );
         let err = engine.run(&mut step(), &mut ctx(), req()).await.unwrap_err();
         assert_eq!(err.code(), "BUDGET_EXCEEDED");
     }
@@ -457,16 +531,14 @@ mod tests {
     #[tokio::test]
     async fn unplugged_tier_falls_back_down_the_ladder() {
         // router wants frontier; only local is wired → substitute down to local.
-        let engine = Engine::new(
+        let engine = engine_with(
             one_local(echo(0.0)),
             Box::new(FixedRouter("frontier")),
-            Arc::new(PassOracle),
+            Arc::new(EvidenceOracle),
             Arc::new(RecSpine::default()),
             None,
             None,
-            "local".into(),
-        )
-        .unwrap();
+        );
         let out = engine.run(&mut step(), &mut ctx(), req()).await.unwrap();
         assert_eq!(out.tier_used, "local");
         assert!(out.substituted);
@@ -479,16 +551,7 @@ mod tests {
         let mut slots = BTreeMap::new();
         slots.insert("local".to_string(), TierSlot { tier: echo(0.0), chain: Chain::new(vec![]), model: "m-local".into() });
         slots.insert("cheap-API".to_string(), TierSlot { tier: echo(0.0), chain: Chain::new(vec![]), model: "m-cheap".into() });
-        let engine = Engine::new(
-            slots,
-            Box::new(EscalatingRouter),
-            Arc::new(FailOracle),
-            Arc::new(RecSpine::default()),
-            None,
-            None,
-            "local".into(),
-        )
-        .unwrap();
+        let engine = engine_with(slots, Box::new(EscalatingRouter), Arc::new(FailOracle), Arc::new(RecSpine::default()), None, None);
 
         let mut s = step();
         let mut c = ctx();
@@ -497,5 +560,102 @@ mod tests {
         assert_eq!(s.oracle_failures, 1); // …and fails its oracle
         let t2 = engine.run(&mut s, &mut c, req()).await.unwrap();
         assert_eq!(t2.tier_used, "cheap-API"); // next turn escalates because the Step carried it
+    }
+
+    // ── I5 teeth: the resolver + the two hardenings ──
+
+    #[tokio::test]
+    async fn unresolved_golden_ref_fails_closed() {
+        // a step names a golden absent from the (empty) registry → missing assertion → fail-closed,
+        // never a vacuous pass; it also feeds the escalation ladder.
+        let engine = engine_with(
+            one_local(echo(0.0)),
+            Box::new(FixedRouter("local")),
+            Arc::new(PassOracle),
+            Arc::new(RecSpine::default()),
+            None,
+            None,
+        );
+        let mut s = step();
+        s.golden_refs = vec!["does_not_exist".into()];
+        let out = engine.run(&mut s, &mut ctx(), req()).await.unwrap();
+        assert!(!out.verdict.passed, "unresolved golden_ref must fail closed");
+        assert!(out.verdict.failures.iter().any(|f| f.contains("unresolved golden_ref")));
+        assert_eq!(s.oracle_failures, 1);
+    }
+
+    #[tokio::test]
+    async fn resolved_golden_ref_does_not_fail_closed() {
+        // a known ref resolves → no fail-closed; the case is available to the oracle.
+        let mut goldens = HashMap::new();
+        goldens.insert("g1".to_string(), GoldenCase { name: "g1".into(), input: json!({}), expect: json!({}) });
+        let engine = Engine::new(EngineConfig {
+            slots: one_local(echo(0.0)),
+            router: Box::new(FixedRouter("local")),
+            oracle: Arc::new(EvidenceOracle),
+            spine: Arc::new(RecSpine::default()),
+            memory: None,
+            trace_sink: None,
+            default_tier: "local".into(),
+            goldens,
+        })
+        .unwrap();
+        let mut s = step();
+        s.golden_refs = vec!["g1".into()];
+        let out = engine.run(&mut s, &mut ctx(), req()).await.unwrap();
+        assert!(out.verdict.passed, "resolved ref + asserting oracle → pass");
+        assert!(!out.verdict.failures.iter().any(|f| f.contains("unresolved")));
+    }
+
+    #[tokio::test]
+    async fn critical_step_with_no_oracle_is_config_fault() {
+        // PassOracle emits NO evidence; a CRITICAL step with nothing asserting is a config fault.
+        let engine = engine_with(
+            one_local(echo(0.0)),
+            Box::new(FixedRouter("local")),
+            Arc::new(PassOracle),
+            Arc::new(RecSpine::default()),
+            None,
+            None,
+        );
+        let mut s = step();
+        s.critical = true;
+        let out = engine.run(&mut s, &mut ctx(), req()).await.unwrap();
+        assert!(!out.verdict.passed, "critical + no applicable oracle must fail (not a vacuous pass)");
+        assert!(out.verdict.failures.iter().any(|f| f.contains("config fault")));
+    }
+
+    #[tokio::test]
+    async fn critical_step_with_an_asserting_oracle_passes() {
+        // a critical step is fine when an oracle actually asserts (evidence present).
+        let engine = engine_with(
+            one_local(echo(0.0)),
+            Box::new(FixedRouter("local")),
+            Arc::new(EvidenceOracle),
+            Arc::new(RecSpine::default()),
+            None,
+            None,
+        );
+        let mut s = step();
+        s.critical = true;
+        assert!(engine.run(&mut s, &mut ctx(), req()).await.unwrap().verdict.passed);
+    }
+
+    #[tokio::test]
+    async fn plain_turn_passes_silently() {
+        // no false alarms: a non-critical, no-ref chat turn still passes vacuously — verify runs but
+        // nothing fails. The teeth bite on critical/ref'd work, not on plain chat.
+        let engine = engine_with(
+            one_local(echo(0.0)),
+            Box::new(FixedRouter("local")),
+            Arc::new(PassOracle),
+            Arc::new(RecSpine::default()),
+            None,
+            None,
+        );
+        let mut s = step(); // critical:false, golden_refs:[]
+        let out = engine.run(&mut s, &mut ctx(), req()).await.unwrap();
+        assert!(out.verdict.passed, "plain non-critical no-ref turn passes silently");
+        assert!(out.verdict.failures.is_empty(), "no false alarm on a plain turn");
     }
 }

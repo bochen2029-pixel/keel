@@ -136,12 +136,25 @@ impl Oracle for SourceOracle {
 /// `output.content` parsed as JSON. **Any** violation → the verdict fails and lists every violation:
 /// an invalid output is **rejected, never partially applied** (the Director's invariant). A schema
 /// that will not compile **fails closed** — KEEL never blesses what it cannot check (§5).
+/// The JSON Schema draft KEEL pins for **every** `SchemaOracle` — Draft 2020-12 (the current IETF
+/// standard; KEEL and its cells author Directive/tool schemas against it). A safety oracle must
+/// **never** auto-select the draft from `$schema` (or default to "latest"): validating against a
+/// different draft than the schema was authored for is a silent JOINT_WRONG (subtly-wrong
+/// accept/reject, everything green). The pin is explicit and the constructor strips any embedded
+/// `$schema`, so the governing draft is deterministic regardless of the document. (A cell needing a
+/// different draft is a future explicit `with_draft` param — never an auto-detect.)
+const PINNED_DRAFT: jsonschema::Draft = jsonschema::Draft::Draft202012;
+
 pub struct SchemaOracle {
     schema: Value,
 }
 
 impl SchemaOracle {
-    pub fn new(schema: Value) -> Self {
+    pub fn new(mut schema: Value) -> Self {
+        // determinism: drop any embedded `$schema` so PINNED_DRAFT always governs, never the document.
+        if let Some(obj) = schema.as_object_mut() {
+            obj.remove("$schema");
+        }
         Self { schema }
     }
 
@@ -168,7 +181,7 @@ impl Oracle for SchemaOracle {
             }
         };
         // compile the schema; fail closed if it cannot be compiled (cannot assert what it cannot check).
-        let validator = match jsonschema::validator_for(&self.schema) {
+        let validator = match jsonschema::options().with_draft(PINNED_DRAFT).build(&self.schema) {
             Ok(v) => v,
             Err(e) => return Ok(Self::reject(format!("schema: cannot compile schema ({e}) — fail-closed"))),
         };
@@ -380,5 +393,32 @@ mod tests {
         // missing required `path` → rejected
         let bad = StepOutput { content: String::new(), artifact: json!({ "wrong": 1 }) };
         assert!(!oracle.verify(&bad, &[], &ctx).await.unwrap().passed, "non-conformant tool-call must be rejected");
+    }
+
+    /// Hardening: the oracle **pins** the draft (Draft 2020-12) and never auto-selects from `$schema`
+    /// — else a Directive validated against the wrong draft is a silent JOINT_WRONG. Proof:
+    /// `exclusiveMinimum` is *numeric* in Draft 2020-12 (the value must exceed it) but a *boolean*
+    /// modifier in Draft 4; we even embed a draft-04 `$schema` decoy. Under the pin, instance `5`
+    /// violates `exclusiveMinimum: 5` (5 is not > 5) → **rejected**; `6` → accepted (which also proves
+    /// the schema compiled + the constraint is live, so the rejection isn't a fail-closed artifact).
+    #[tokio::test]
+    async fn schema_oracle_pins_the_draft() {
+        let schema = json!({
+            "$schema": "http://json-schema.org/draft-04/schema#", // decoy — must NOT take effect
+            "type": "integer",
+            "exclusiveMinimum": 5
+        });
+        let oracle = SchemaOracle::new(schema);
+        let ctx = Context::default();
+        let five = StepOutput { content: String::new(), artifact: json!(5) };
+        assert!(
+            !oracle.verify(&five, &[], &ctx).await.unwrap().passed,
+            "pinned Draft 2020-12: 5 is not > 5 → rejected (the decoy draft-04 must be ignored)"
+        );
+        let six = StepOutput { content: String::new(), artifact: json!(6) };
+        assert!(
+            oracle.verify(&six, &[], &ctx).await.unwrap().passed,
+            "6 > 5 → valid (proves the schema compiled and the constraint is actually applied)"
+        );
     }
 }
