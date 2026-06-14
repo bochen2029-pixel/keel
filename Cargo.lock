@@ -617,6 +617,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "keel-services"
+version = "0.2.0"
+dependencies = [
+ "keel-contracts",
+ "serde_json",
+]
+
+[[package]]
 name = "keel-store"
 version = "0.2.0"
 dependencies = [

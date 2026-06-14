@@ -1,0 +1,12 @@
+[package]
+name = "keel-services"
+description = "KEEL L4 — services (route · amplify · verify · memory · perception · driver). Composes adapters under middleware."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+keel-contracts = { path = "../keel-contracts" }
+
+[dev-dependencies]
+serde_json = "1"
