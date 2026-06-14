@@ -455,6 +455,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "keel"
+version = "0.2.0"
+dependencies = [
+ "keel-adapters",
+ "keel-contracts",
+ "keel-kernel",
+ "keel-middleware",
+ "tokio",
+]
+
+[[package]]
 name = "keel-adapters"
 version = "0.2.0"
 dependencies = [
@@ -497,6 +508,7 @@ dependencies = [
  "keel-kernel",
  "regex",
  "serde",
+ "serde_json",
  "tokio",
 ]
 

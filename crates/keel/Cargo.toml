@@ -1,0 +1,17 @@
+[package]
+name = "keel"
+description = "KEEL L5 — the daily-driver CLI: keel.lock -> registry -> invariant chain -> tier."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "keel"
+path = "src/main.rs"
+
+[dependencies]
+keel-contracts = { path = "../keel-contracts" }
+keel-kernel = { path = "../keel-kernel" }
+keel-middleware = { path = "../keel-middleware" }
+keel-adapters = { path = "../keel-adapters" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

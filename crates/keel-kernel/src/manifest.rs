@@ -40,6 +40,9 @@ pub struct TierCfg {
     /// Env-var name holding the key; resolved at runtime, never inlined.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key_env: Option<String>,
+    /// Optional explicit endpoint (e.g. a cloud API base). Local resolves to the llama-server URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
     #[serde(default)]
     pub price: PriceCfg,
     #[serde(default)]

@@ -14,6 +14,6 @@ pub mod audit;
 pub mod cost;
 pub mod privacy;
 
-pub use audit::{AuditEvent, AuditMiddleware, AuditSink};
+pub use audit::{AuditEvent, AuditMiddleware, AuditSink, FileAuditSink};
 pub use cost::CostMiddleware;
 pub use privacy::{Finding, PrivacyMiddleware, Redactor};

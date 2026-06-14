@@ -69,6 +69,41 @@ impl Middleware for AuditMiddleware {
     }
 }
 
+/// An append-only JSONL `AuditSink` — the file ledger (canon §11, §13). Best-effort: a write
+/// failure goes to stderr and never crashes the call (a hash-chained durable sink swaps in later).
+pub struct FileAuditSink {
+    file: std::sync::Mutex<std::fs::File>,
+}
+
+impl FileAuditSink {
+    /// Open the audit ledger at `path` in append mode, creating parent dirs + the file.
+    pub fn new(path: impl AsRef<std::path::Path>) -> std::io::Result<Self> {
+        let path = path.as_ref();
+        if let Some(dir) = path.parent() {
+            if !dir.as_os_str().is_empty() {
+                std::fs::create_dir_all(dir)?;
+            }
+        }
+        let file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+        Ok(Self { file: std::sync::Mutex::new(file) })
+    }
+}
+
+impl AuditSink for FileAuditSink {
+    fn emit(&self, event: &AuditEvent) {
+        use std::io::Write;
+        let Ok(line) = serde_json::to_string(event) else {
+            eprintln!("[keel] audit serialize failed");
+            return;
+        };
+        if let Ok(mut f) = self.file.lock() {
+            if let Err(e) = writeln!(f, "{line}").and_then(|()| f.flush()) {
+                eprintln!("[keel] audit write failed: {e}");
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{AuditEvent, AuditMiddleware, AuditSink};
