@@ -3,12 +3,13 @@
 
 ## ⛑ RECONSTITUTION PROTOCOL — read this FIRST after any compaction/resume, before ANY other action
 The conversation summary is **lossy**. The committed repo + the canon are the truth. Before resuming work or answering a new turn:
-1. **Read this file (STATE.md) fully.**
+1. **Read this file (STATE.md) fully**, then the live-session handoff in order: `_run_state/handoff/forward-arc.md` (the causal arc + the operator-confirmed next move) → `_run_state/handoff/recent-turns.md` (recent turns, reverse-chronological, newest-first). Those are the **narrative register** (per the `perpetual-memory` skill / REEL); the **factual register** is git + the contracts/goldens — trust it on any conflict.
 2. **Read the canon** `C:\KEEL\KEEL_ARCHITECTURE.md` **+ the constitution** `C:\KEEL\CLAUDE.md`.
    ⚠ **The session cwd is `C:\loom`, so the AUTO-LOADED CLAUDE.md is Marrow-L1's, NOT KEEL's.** The active project is **KEEL at `C:\KEEL`**. Do not act on the Marrow-L1 constitution.
 3. **Verify real state, never recall:** `git -C C:\KEEL log --oneline -8` + `git -C C:\KEEL status`; then from **PowerShell** `cargo check -p keel-contracts` (must be green).
 4. Confirm goldens frozen: `C:\KEEL\tests\golden\.frozen.json` sha256 `63d5ba7cee610e92…`.
 5. **Only then** resume from "Next" below. **Trust files over summary; verify by artifact, never by memory.**
+6. **Backstop (per `perpetual-memory` skill):** the full session transcript on disk is the source of truth for anything the distillation dropped — `grep` the session `.jsonl` under `C:\Users\user\.claude\projects\C--loom\` for specifics (or open it in `C:\TRANSPORTER\claude_archive_viewer_v4.html` and concept-search). Do **not** re-read it whole.
 
 ## Where we are (2026-06-13)
 - **KEEL** = the sovereign genome harness. Canon **v0.2 adopted**. **Native Rust core** (ADR #5). Consumed **embedded or over protocol**. L1 personal tool, not a product.
