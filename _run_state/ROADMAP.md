@@ -220,8 +220,11 @@ just post-DONE, to catch drift early.)*
   verify by artifact (`.keelstate/audit.jsonl`, `tape`, `keel metrics`) + always TTL the run. *Real fix
   (deferred):* spawn llama-server fully detached (all 3 std handles explicit + `DETACHED_PROCESS`) in
   `kernel::lifecycle::launch` — a tried patch was gate-green but did NOT resolve the live hang, so the
-  root cause needs more investigation; reverted to keep the checkpoint honest. Unblocks: a careful
-  bounded live-capture repro.
+  root cause needs more investigation; reverted to keep the checkpoint honest. **WORKAROUND WORKS
+  (used live 2026-06-15):** run live model commands via `Start-Process -RedirectStandardOutput <file>
+  -PassThru` + `$p.WaitForExit(ms)` → `$p.Kill($true)` (a reliable self-kill) and a **file redirect, NOT
+  `| Out-String`** — `keel consolidate` then cold-started + ran + exited clean, no hang. The lifecycle
+  detach root-fix stays nice-to-have (low priority now the workaround is proven).
 - **ISSUE-9 [operator policy — privacy]** — A4's I3 output rung needs a policy decision (operator's
   flagged forward-design area): does the genome default **mask output PII on all tiers** (keeps PII out
   of the persistent Tape/ledger/egress, but masks a local sovereign answer's own PII) **or egress-only +
