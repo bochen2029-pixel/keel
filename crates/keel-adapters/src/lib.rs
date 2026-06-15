@@ -17,6 +17,8 @@ pub mod local_llama;
 #[cfg(feature = "mic")]
 pub mod mic;
 pub mod openai;
+#[cfg(feature = "screen")]
+pub mod screen;
 pub mod wav;
 pub mod whisper;
 
@@ -25,5 +27,7 @@ pub use deepseek::DeepSeek;
 pub use local_llama::LocalLlama;
 #[cfg(feature = "mic")]
 pub use mic::Microphone;
+#[cfg(feature = "screen")]
+pub use screen::ScreenCapture;
 pub use wav::write_wav_i16;
 pub use whisper::Whisper;

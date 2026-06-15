@@ -13,10 +13,14 @@ serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 # the microphone capture organ (canon 12 ears), opt-in so the default core pulls no audio dependency.
 cpal = { version = "0.17", optional = true }
+# the screen capture organ (canon 12 eyes), opt-in; xcap grabs a frame, the native Qwen vision sees it.
+xcap = { version = "0.8", optional = true }
 
 [features]
 # enable the cpal microphone capture organ (keel-adapters::mic). Off by default (the minimal-core thesis).
 mic = ["dep:cpal"]
+# enable the xcap screen capture organ (keel-adapters::screen). Off by default (minimal-core).
+screen = ["dep:xcap"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
