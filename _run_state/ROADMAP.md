@@ -139,16 +139,22 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
 - `[?] B1` · **`svc::amplify` (best-of-N + verifier-select)** — build the structure **clamped OFF**
   (n=1). The §23 falsifier: does verified best-of-N beat single-pass on a fixed benchmark? → ISSUE-4
   (run the benchmark; decide ON/OFF). **No new dep** (uses local tier + the verifier).
-- `[?] B3` · **flywheel metric** — `escalation_rate` trend over runs (needs A2 daemon producing
-  multi-turn data); §23: flat after N cycles → flywheel doesn't compound. → ISSUE-5 (measure).
+- `[~] B3` · **flywheel metric** — **PRELIM 2026-06-15:** `escalation_rate` = **0.000 over 18 live turns**
+  (base case — no oracle-failure escalations; the canon base case, "ignition is upside"). The
+  **trend-down** needs the Stage-3 flywheel (distillation) running over cycles — deferred (the out-of-band
+  trainer isn't run). Base case measured ✓; trend pending the flywheel. → ISSUE-5.
 - `[x] B4` · **`svc::distill` (out-of-band)** — DONE 2026-06-15. `keel-services::distill`
   (`training_pair`/`export_training_jsonl`) flattens the scrubbed corpus → chat-format
   `{messages:[user,assistant]}` JSONL; `keel distill-export [--in][--out]` writes the training file.
   Corpus scrubbed at write (B2) ⇒ export carries no secret. LoRA training stays external (Unsloth). +3 tests.
 
 ### Phase C — the §23 falsifiers (check + DECIDE each; a decision is the deliverable)
-- `[?] C1` reranker vs identity on `GOLDEN_RECALL` → keep OFF or turn ON. (after A3)
-- `[?] C2` embedder vs the MiniLM floor → keep floor or upgrade. (after A3)
+- `[?] C1` reranker vs identity on `GOLDEN_RECALL` → keep OFF or turn ON. (after A3) — **STATUS
+  2026-06-15:** the embed organ + brute-force cosine recall + fingerprint golden are built (A3); the
+  recall@k **uplift** benchmark needs the embed model served + a labeled set = a focused live session
+  (the embed-server setup is stuck-prone unattended → deferred per pivot-when-stuck, not blocking).
+- `[?] C2` embedder vs the MiniLM floor → keep floor or upgrade. (after A3) — same as C1 (needs the live
+  embed benchmark; deferred to a focused session).
 - `[?] C3` privacy model vs deterministic-only on `GOLDEN_PRIVACY`. (after A5)
 - `[~] C4` `rework_rate` < 10% with oracles on — **PRELIM PASS 2026-06-15:** rework_rate **0.056 (5.6%)**
   over 18 live turns, oracles on → under 10%. ✓ (Small N; revisit with more daemon data.)
