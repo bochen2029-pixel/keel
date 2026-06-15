@@ -147,8 +147,11 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
 - `[?] C1` reranker vs identity on `GOLDEN_RECALL` → keep OFF or turn ON. (after A3)
 - `[?] C2` embedder vs the MiniLM floor → keep floor or upgrade. (after A3)
 - `[?] C3` privacy model vs deterministic-only on `GOLDEN_PRIVACY`. (after A5)
-- `[?] C4` `rework_rate` < 10% with oracles on. (needs A2 data)
-- `[?] C5` economic: KEEL overhead vs cheap-API-single-pass-for-everything. (needs cost data)
+- `[~] C4` `rework_rate` < 10% with oracles on — **PRELIM PASS 2026-06-15:** rework_rate **0.056 (5.6%)**
+  over 18 live turns, oracles on → under 10%. ✓ (Small N; revisit with more daemon data.)
+- `[~] C5` economic: KEEL vs cheap-API-for-everything — **PRELIM KEEL-FAVORABLE 2026-06-15:** routed
+  **17/18 turns to FREE local**, 1 to cheap-API (total $0.0004) vs ~$0.0018 for cheap-API-everything
+  (~78% saved). KEEL's routing pays. ✓ (Small N.)
 - *(Each falsifier trip says "revise, don't extend" — blast radius one adapter. Record the decision +
   rationale in WORKLOG; flip the relevant default in `keel.lock` if warranted [config, not a pin].)*
 
