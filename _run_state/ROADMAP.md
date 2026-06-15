@@ -132,9 +132,10 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   (run the benchmark; decide ON/OFF). **No new dep** (uses local tier + the verifier).
 - `[?] B3` · **flywheel metric** — `escalation_rate` trend over runs (needs A2 daemon producing
   multi-turn data); §23: flat after N cycles → flywheel doesn't compound. → ISSUE-5 (measure).
-- `[ ] B4` · **`svc::distill` (out-of-band)** — KEEL only **emits + stores** the verified-trace corpus;
-  the LoRA training is external (Unsloth Studio, an operator step, §16-refused from the core). **Done =**
-  the corpus is distill-ready + the hand-off documented.
+- `[x] B4` · **`svc::distill` (out-of-band)** — DONE 2026-06-15. `keel-services::distill`
+  (`training_pair`/`export_training_jsonl`) flattens the scrubbed corpus → chat-format
+  `{messages:[user,assistant]}` JSONL; `keel distill-export [--in][--out]` writes the training file.
+  Corpus scrubbed at write (B2) ⇒ export carries no secret. LoRA training stays external (Unsloth). +3 tests.
 
 ### Phase C — the §23 falsifiers (check + DECIDE each; a decision is the deliverable)
 - `[?] C1` reranker vs identity on `GOLDEN_RECALL` → keep OFF or turn ON. (after A3)

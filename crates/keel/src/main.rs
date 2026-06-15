@@ -38,6 +38,11 @@ async fn run() -> keel_contracts::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("daemon") {
         return run_daemon().await;
     }
+    // `keel distill-export [--in corpus.jsonl] [--out training.jsonl]` — flatten the secret-scrubbed
+    // verified-trace corpus (B2) into chat-format training pairs for an out-of-band trainer (Unsloth).
+    if std::env::args().nth(1).as_deref() == Some("distill-export") {
+        return run_distill_export();
+    }
     let mut manifest_path = "keel.lock".to_string();
     let mut tier_override: Option<String> = None;
     let mut think = false;
@@ -246,6 +251,31 @@ fn report_daemon(n: usize, o: &keel::Outcome, ctx: &Context) {
         "[keel] daemon turn {n}: tier={} cost=${:.4} (run ${:.4}) verdict={verdict} | {answer}",
         o.tier_used, o.result.cost, ctx.cost.total,
     );
+}
+
+/// `keel distill-export` — flatten the secret-scrubbed verified-trace corpus into chat-format training
+/// pairs for an out-of-band trainer (Unsloth). Reads the corpus, writes `{messages:[user,assistant]}`
+/// JSONL. The corpus is already scrubbed at write time (B2), so the export carries no secret.
+fn run_distill_export() -> keel_contracts::Result<()> {
+    let mut input = keel::TRACES_PATH.to_string();
+    let mut output = ".keelstate/traces/training.jsonl".to_string();
+    let mut args = std::env::args().skip(2);
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--in" => input = args.next().unwrap_or(input),
+            "--out" => output = args.next().unwrap_or(output),
+            _ => {}
+        }
+    }
+    let corpus = std::fs::read_to_string(&input).unwrap_or_default();
+    let jsonl = keel_services::export_training_jsonl(&corpus);
+    let pairs = if jsonl.is_empty() { 0 } else { jsonl.lines().count() };
+    if let Some(dir) = std::path::Path::new(&output).parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    std::fs::write(&output, &jsonl).map_err(|e| keel_contracts::KeelError::Other(format!("write {output}: {e}")))?;
+    eprintln!("[keel] distill-export: {pairs} pair(s) {input} -> {output} (out-of-band trainer: Unsloth)");
+    Ok(())
 }
 
 /// Print the answer (+ thinking on `--think`) and the per-call footer: route reason, tier/model/cost.
