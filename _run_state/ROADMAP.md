@@ -103,9 +103,19 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
 - `[G] A5` · **privacy rung-3** — OpenAI Privacy Filter via `ort`/ONNX (in-process, NOT GGUF), behind
   `GOLDEN_PRIVACY`; additive recall, **never the guarantee** (rungs 1-2 carry it). **Operator: least
   urgent / LAST.** **New dep:** `ort` (heavy native). → ISSUE-2.
-- `[G] A6` · **memory narrative register + consolidation** — model-authored narrative register +
-  `consolidate()` generation + Ring-1/Ring-4. **The canon's highest-risk seam → ISSUE-3 operator-review**
-  (design vs `docs/proposals/perpetual-memory.md`). The factual register (Tape) already exists.
+- `[~] A6` · **memory narrative register + consolidation** — operator-directed 2026-06-15 (was `[G]`
+  ISSUE-3; the operator steered me onto it, so the **safe structural cut** proceeded; the riskier
+  model-dependent generation stays for a careful pass).
+  **A6.1 DONE** (model-free, additive, behind the frozen `Memory` trait — no contract change): the Ring-3
+  **narrative register** (a sibling of the Tape; `FileMemory::narrative()`/`set_narrative()`), **separate
+  from the lossless factual Tape** (I5 — a model may not author its own ground truth); `assemble` now
+  layers Ring-0 soul → Ring-3 narrative → Ring-2 recent; `consolidate()` returns a real **self-interview
+  / forward-narrative** prompt over the prior narrative + recent turns (per `perpetual-memory.md`). +3
+  tests; gate 117/5 green.
+  **A6.2 remaining** (deferred — model-dependent / higher-risk): wire the consolidation loop (a Driver/
+  threshold emits `consolidate()` → engine generates → L5 stores via `set_narrative`; generation needs
+  the model = a bounded/operator-verified step), the **cold-eyes validation** Step (diff narrative vs
+  Tape, I5), a swappable consolidation policy, Ring-1/Ring-4 (Ring-4 = the A3 embedder).
 
 ### Phase B — Stage 3 (the flywheel; size to the base case, ignition is upside)
 - `[ ] B2` · **`TraceSink` file impl** — passed verdicts → an append-only distill corpus
