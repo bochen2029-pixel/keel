@@ -157,10 +157,19 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   rationale in WORKLOG; flip the relevant default in `keel.lock` if warranted [config, not a pin].)*
 
 ### Phase D — the first real cell (the §17/§21 proof that the genome is at the right altitude)
-- `[ ] D1` · **(controlled experiment) re-home NightClerk or NightScribe on KEEL** — known shape, clean
-  boundary signal. NightScribe (`C:\ClaudeCode\photo2deck\labs\nightscribe`) is the eyes+ears reference
-  (Qwen-vision screenshots + Whisper, timestamp-fused). **Done =** its eyes/ears/memory/route come from
-  KEEL **unchanged**; only domain periphery written. (Consumes KEEL over `serve_openai` or `embed`.)
+- `[~] D1` · **(controlled experiment) re-home NightScribe on KEEL** — **SCOPED 2026-06-15** (boundary
+  clean — confirms the genome is at the right altitude; the build is the next major effort, C#-app→KEEL
+  over `serve_openai`). NightScribe (`C:\ClaudeCode\photo2deck\labs\nightscribe`, C#/.NET, Phases 0-3
+  done) **independently rebuilt KEEL's exact pieces by hand** — the .NET-of-AI-apps case in the flesh.
+  **FROM KEEL (unchanged):** eyes (native Qwen vision, `local_llama` image_url) · ears (`whisper`) · the
+  perception change-gate (dHash `FrameGate` + VAD + `see()`/`hear()`/`listen()`/`see_screen()`) · route
+  (`DifficultyRouter`, local-first) · I5 oracle (its "deterministic token match, no LLM judges itself"
+  = a `PropertyOracle`/`SourceOracle`) · memory (Tape + Ring-4 = its intent-memory routing db) ·
+  constrained decode (its schema-constrained frame descriptions = `local_llama` json_schema). **CELL
+  PERIPHERY (write):** meeting capture topology (dual-track mic=me/loopback=them → KEEL's `source` field)
+  · MP4 import (ffmpeg) · minutes synthesis (map-reduce at slide boundaries — a domain prompt chain) ·
+  GUI/tray · the golden-meeting eval. **Done =** those KEEL pieces come unchanged; only the periphery is
+  written. If the cell forces a kernel/contract edit → KEEL's boundary is wrong, fix KEEL first.
 - `[ ] D2` · **SEXTANT on KEEL** (the canon first cell) — done = Conductor (`engine`) / Router /
   Gate (Truth Gate `Oracle`, `INSUFFICIENT_SOURCE`→human) / Canon (factual `Memory`) / State (`Store`)
   / ToolHost (Gmail MCP) / vision retina — **all from KEEL unchanged**; only job-domain periphery.
