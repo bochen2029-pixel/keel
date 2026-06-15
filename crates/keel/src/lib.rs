@@ -22,7 +22,7 @@ use keel_contracts::{
 use keel_kernel::engine::{Engine as KernelEngine, EngineConfig, TierSlot};
 use keel_kernel::{Chain, Manifest, Registry, TierCfg};
 use keel_middleware::{AuditMiddleware, AuditSink, CostMiddleware, FileAuditSink, PrivacyMiddleware, Redactor};
-use keel_services::{DifficultyRouter, FileMemory, GoldenDispatchOracle, PropertyOracle, Verifier};
+use keel_services::{DifficultyRouter, FileMemory, FileTraceSink, GoldenDispatchOracle, PropertyOracle, Verifier};
 use keel_store::SqliteStore;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -38,6 +38,9 @@ pub const INDEX_DB: &str = ".keelstate/index.db";
 /// The append-only Memory **Tape** — the lossless factual register (canon §11); persistent working
 /// memory across runs. The SQLite index above is the derived checkpoint.
 pub const TAPE_PATH: &str = ".keelstate/tape/tape.jsonl";
+/// The append-only **distill corpus** (canon §8 step 9): passed verdicts, **secrets scrubbed** before
+/// write (the reversibility gate, §5 — never train on a secret). Feedstock for out-of-band distillation.
+pub const TRACES_PATH: &str = ".keelstate/traces/corpus.jsonl";
 /// Operator-frozen ground truth the engine resolves `step.golden_refs` against (read-only). KEEL's
 /// own conformance set; a cell points the registry at its own goldens instead.
 pub const GOLDEN_PATH: &str = "tests/golden/golden.json";
@@ -113,6 +116,11 @@ impl Engine {
         // back from the Tape, so working memory persists ACROSS `keel` invocations; the engine appends
         // each Trace to the Tape post-checkpoint. `TraceSink` (the flywheel feed) stays `None` until Stage 3.
         let memory: Option<Arc<dyn keel_contracts::Memory>> = Some(Arc::new(FileMemory::new("", TAPE_PATH, 6)));
+        // The flywheel feed (canon §8 step 9): a passed verdict → an append-only distill corpus, with
+        // secrets SCRUBBED first (reversibility gate §5) via the SAME `redactor` as the I3 egress mask —
+        // one definition of "secret", so the corpus never carries what egress would have masked.
+        let trace_sink: Option<Arc<dyn keel_contracts::TraceSink>> =
+            Some(Arc::new(FileTraceSink::new(TRACES_PATH, redactor.clone())));
         let engine = KernelEngine::new(EngineConfig {
             slots,
             router,
@@ -120,7 +128,7 @@ impl Engine {
             baseline,
             spine,
             memory,
-            trace_sink: None,
+            trace_sink,
             default_tier: manifest.router.default_tier.clone(),
             goldens,
         })?;

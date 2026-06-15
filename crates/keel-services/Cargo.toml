@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 keel-contracts = { path = "../keel-contracts" }
 keel-adapters = { path = "../keel-adapters" }  # the whisper organ for the hear() retina (services compose adapters, canon 6)
+keel-middleware = { path = "../keel-middleware" }  # reuse Redactor in the TraceSink scrub (services may import middleware, canon 6)
 async-trait = "0.1"
 regex = "1"
 serde_json = "1"

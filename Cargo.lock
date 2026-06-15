@@ -1485,6 +1485,7 @@ dependencies = [
  "jsonschema",
  "keel-adapters",
  "keel-contracts",
+ "keel-middleware",
  "regex",
  "serde_json",
  "tokio",

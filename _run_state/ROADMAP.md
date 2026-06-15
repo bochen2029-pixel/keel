@@ -91,9 +91,11 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   ok:true, checkpointed+Taped+audited (`keel metrics` saw the turns). **No new dep.** +4 tests.
   *(NB: capturing the daemon's output in the same shell can hang on Windows cold-start — a shell/handle
   artifact, NOT a daemon defect; the daemon exits fine. → ISSUE-8; verify-by-artifact instead.)*
-- `[ ] A4` · **re-home the no-SSN baseline → an I3 output rung** (`mw::privacy` output-side check) so
-  the engine's `EngineConfig.baseline` STOPGAP retires. **Done =** local-turn output PII is masked by
-  an I3 rung, not the I5 baseline; the baseline slot is dropped. **No new dep.**
+- `[G] A4` · **re-home the no-SSN baseline → an I3 output rung** (`mw::privacy` output-side check) so
+  the engine's `EngineConfig.baseline` STOPGAP retires. **Done =** output PII handled by an I3 rung,
+  not the I5 baseline; the baseline slot is dropped. **No new dep.** **DEFERRED by operator 2026-06-15
+  → ISSUE-9** (a real privacy-policy fork in his flagged forward-design area: mask-all-output vs
+  egress-only-mask; sharper now that A6.1's Tape persists outputs). Build only after the policy is set.
 - `[G] A3` · **embedder + `GOLDEN_RECALL`** — **format-committing (ADR #13) → ISSUE-1 operator
   design-review FIRST.** Proposed shape: embed adapter = HTTP to llama-server `/v1/embeddings`
   (Qwen3-Embedding-0.6B, model at `C:\models`) reusing the `openai` mapping; `sqlite-vec` vector index
@@ -118,10 +120,13 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   Tape, I5), a swappable consolidation policy, Ring-1/Ring-4 (Ring-4 = the A3 embedder).
 
 ### Phase B — Stage 3 (the flywheel; size to the base case, ignition is upside)
-- `[ ] B2` · **`TraceSink` file impl** — passed verdicts → an append-only distill corpus
-  (`.keelstate/traces`), **secrets scrubbed before feedstock** (reversibility gate — no secret
-  fossilized into a LoRA). **Done =** the engine's emit-on-pass writes scrubbed `VerifiedTrace`s.
-  **No new dep.** **Deps:** none.
+- `[x] B2` · **`TraceSink` file impl** — DONE 2026-06-15. `keel-services::FileTraceSink` appends each
+  passed `VerifiedTrace` to an append-only JSONL distill corpus (`.keelstate/traces/corpus.jsonl`),
+  **scrubbing secrets/PII first** (the reversibility gate §5 — never train on a secret) via the **same
+  `Redactor`** the I3 egress mask uses (one definition of "secret"; services→middleware, layer-legal).
+  Scrubs the (prompt, completion) pair = `step.content` + `result.content`/`reasoning_content`. Wired
+  into the engine's emit-on-pass (L5 `trace_sink: Some(...)`). **No new external dep.** +2 tests (scrub
+  secret/ssn/email before write · append-one-line-per-trace + clean text verbatim); 119/5 green.
 - `[?] B1` · **`svc::amplify` (best-of-N + verifier-select)** — build the structure **clamped OFF**
   (n=1). The §23 falsifier: does verified best-of-N beat single-pass on a fixed benchmark? → ISSUE-4
   (run the benchmark; decide ON/OFF). **No new dep** (uses local tier + the verifier).
@@ -206,6 +211,12 @@ just post-DONE, to catch drift early.)*
   `kernel::lifecycle::launch` — a tried patch was gate-green but did NOT resolve the live hang, so the
   root cause needs more investigation; reverted to keep the checkpoint honest. Unblocks: a careful
   bounded live-capture repro.
+- **ISSUE-9 [operator policy — privacy]** — A4's I3 output rung needs a policy decision (operator's
+  flagged forward-design area): does the genome default **mask output PII on all tiers** (keeps PII out
+  of the persistent Tape/ledger/egress, but masks a local sovereign answer's own PII) **or egress-only +
+  audit-local** (sovereign local answers intact; PII can sit in the local Tape)? The middleware can't
+  see a turn's `sovereign` class (it only sees request/response), so one default must be chosen. A6.1
+  made this sharper (the Tape now persists outputs). Asked + **deferred 2026-06-15**; build A4 once set.
 - *(Append new issues as discovered, each: `ISSUE-N [type] — description · what unblocks it`. If the
   loop STALLS — only `[G]`/`[!]`/`[?]` slices remain and none can advance — write `.keelstate/STALLED`
   with the reason so the supervisor stops respawning, and the operator resolves the queue on next look.)*

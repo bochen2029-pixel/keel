@@ -17,10 +17,12 @@ pub mod driver;
 pub mod memory;
 pub mod perception;
 pub mod router;
+pub mod trace_sink;
 pub mod verifier;
 
 pub use driver::{HeartbeatDriver, UserTurnDriver, WatchDriver};
 pub use memory::FileMemory;
 pub use perception::{ChangeGate, FrameGate};
 pub use router::DifficultyRouter;
+pub use trace_sink::FileTraceSink;
 pub use verifier::{GoldenDispatchOracle, GoldenOracle, PropertyOracle, SchemaOracle, SourceOracle, Verifier};
