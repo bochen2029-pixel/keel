@@ -102,3 +102,10 @@ First session under the **perpetual** mandate (ROADMAP §0 loop + AUTOSTART — 
 ## 2026-06-15 — SESSION CHECKPOINT (comprehensive: buildable genome done + validated live)
 
 **This session: 11 real slices + 2 live-validation milestones, all gated (128/6 green, clippy clean) + pushed** (`0b93199`→ this run's tip; `git log`). Perception retinas (A1) · daemon + self-consolidation (A2/A6.2) · memory narrative + recall + Ring-4 (A6.1/A3) · flywheel feed + distill-export (B2/B4) · privacy output rung (A4) · conformance map (E1). **Whole flywheel proven LIVE** (real turns route local+cheap-API; memory consolidates a real narrative sovereign/local $0; corpus exports clean training pairs; C4/C5 prelim PASS). The daemon-hang is solved (ISSUE-8 workaround). The operator's directives are baked in (TTL+pivot, never-ask, terse docs — ROADMAP §0.9 + memories). **The directive's end-condition is MET: the bulk + low-hanging fruit are done.** **NEXT for the perpetual loop: the D1 cell build** (NightScribe on KEEL — scoped), then A5/C1/C2/E2 — the larger/heavier tier. State fully checkpointed for a fresh-context continuation.
+
+---
+
+## 2026-06-15 — overnight continuation (operator asleep; directive baked durable)
+
+Operator gave the standing directive (real work / never-ask / TTL+pivot / model-now / common-sense) and went to bed; the run continues. Baked it into `_run_state/OPERATOR_DIRECTIVE.md` + the reconstitution chain (AUTOSTART §0/§1, STATE ⛑) + the cross-session memory, so it survives compaction (commit `acf9f9b`).
+- **Slice A6.2 cold-eyes — `keel cold-eyes` (the I5 capstone for memory, canon §10.2).** `FileMemory::cold_eyes_prompt` builds a **fresh, uninvested** validation pass: diff the model-authored Ring-3 narrative against the lossless Tape (ground truth) → flag claims the Tape doesn't support, else reply CONSISTENT (catches the self-curation blind spot; the Tape validates the narrative, never the reverse — I5). `keel cold-eyes` CLI runs it sovereign→local. Structurally identical to the lived `consolidate`. +1 model-free test. **129/6 green, clippy clean.** Pushed.

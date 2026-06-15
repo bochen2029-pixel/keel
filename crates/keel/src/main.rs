@@ -49,6 +49,11 @@ async fn run() -> keel_contracts::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("consolidate") {
         return run_consolidate().await;
     }
+    // `keel cold-eyes` — validate the model-authored Ring-3 narrative against the lossless Tape (a fresh
+    // pass; the Tape is ground truth, I5 / canon §10.2). Reports CONSISTENT or the unsupported claims.
+    if std::env::args().nth(1).as_deref() == Some("cold-eyes") {
+        return run_cold_eyes().await;
+    }
     let mut manifest_path = "keel.lock".to_string();
     let mut tier_override: Option<String> = None;
     let mut think = false;
@@ -315,6 +320,48 @@ async fn do_consolidation(
     }
     mem.set_narrative(narrative)?;
     Ok(narrative.len())
+}
+
+/// `keel cold-eyes` — validate the model-authored Ring-3 narrative against the lossless Tape (canon
+/// §10.2 / I5): a fresh, uninvested pass flags claims the Tape doesn't support. Sovereign → local.
+async fn run_cold_eyes() -> keel_contracts::Result<()> {
+    let mut manifest_path = "keel.lock".to_string();
+    let mut args = std::env::args().skip(2);
+    while let Some(a) = args.next() {
+        if a == "--manifest" {
+            manifest_path = args.next().unwrap_or_default();
+        }
+    }
+    let manifest = Manifest::load(&manifest_path)?;
+    let mut ctx = new_context(&manifest);
+    let mem = keel_services::FileMemory::new("", keel::TAPE_PATH, 12);
+    let Some(prompt) = mem.cold_eyes_prompt() else {
+        eprintln!("[keel] cold-eyes: no narrative to validate (run `keel consolidate` first)");
+        return Ok(());
+    };
+    let mut step = Step {
+        kind: Kind::CoreWire,
+        ty: "memory:cold_eyes".into(),
+        trust_required: Trust::Normal,
+        data_class: DataClass::Sovereign, // validating personal memory stays on-box
+        tier_history: vec![],
+        oracle_failures: 0,
+        projected_cost: None,
+        critical: false,
+        source: Some("memory".into()),
+        content: vec![Content::Text { text: prompt }],
+        golden_refs: vec![],
+    };
+    let engine = keel::Engine::assemble(&manifest)?;
+    let req = keel_kernel::engine::request_from_step(&step);
+    let outcome = engine.run(&mut step, &mut ctx, req).await?;
+    let verdict = outcome.result.content.trim();
+    if verdict.to_uppercase().starts_with("CONSISTENT") {
+        eprintln!("[keel] cold-eyes: narrative CONSISTENT with the Tape (no drift detected)");
+    } else {
+        eprintln!("[keel] cold-eyes: UNSUPPORTED claim(s) - the narrative drifted from the Tape:\n{verdict}");
+    }
+    Ok(())
 }
 
 /// `keel consolidate` — close the perpetual-memory loop (canon §11): one [`do_consolidation`] turn, then

@@ -177,6 +177,30 @@ impl FileMemory {
         p
     }
 
+    /// The **cold-eyes validation** prompt (canon §10.2 / the perpetual-memory proposal): a FRESH,
+    /// uninvested pass that diffs the model-authored narrative against the lossless Tape (the ground
+    /// truth) — catching the self-curation blind spot (the invested model over-keeps what it found
+    /// salient) and satisfying I5 (the Tape validates the narrative, never the reverse). `None` when
+    /// there is no narrative to validate. The reviewer replies `CONSISTENT` or lists unsupported claims.
+    pub fn cold_eyes_prompt(&self) -> Option<String> {
+        let narrative = self.narrative()?;
+        let recent = self.recent_traces(self.working_turns);
+        let mut p = String::from(
+            "You are a fresh, uninvested reviewer. Below is a NARRATIVE (model-authored, possibly wrong) \
+             and the TAPE (the lossless record of what actually happened - the ground truth). List each \
+             claim in the narrative the Tape does NOT support (over-reach, invention, or drift), one per \
+             line; if every claim is supported, reply with exactly the word CONSISTENT. The Tape is \
+             ground truth; the narrative is not.\n\nNARRATIVE:\n",
+        );
+        p.push_str(&narrative);
+        p.push_str("\n\nTAPE (the facts, oldest first):\n");
+        for t in &recent {
+            p.push_str(&Self::summarize(t));
+            p.push('\n');
+        }
+        Some(p)
+    }
+
     /// Read the last `n` traces from the Tape in chronological order (best-effort: a missing or
     /// short Tape yields fewer; an unparseable line is skipped, never fatal — the Tape outlives schema).
     fn recent_traces(&self, n: usize) -> Vec<Trace> {
@@ -456,6 +480,23 @@ mod tests {
         assert!(text.contains("PRIOR-ARC-TOKEN"), "prior narrative folded in");
         assert!(text.contains("question seventeen") && text.contains("answer seventeen"), "recent turns folded in");
         assert!(text.contains("Tape"), "the I5 boundary is stated (facts of record live in the Tape)");
+        let _ = std::fs::remove_file(&tape);
+        let _ = std::fs::remove_file(narrative_path_for(&tape));
+    }
+
+    #[tokio::test]
+    async fn cold_eyes_prompt_diffs_narrative_against_the_tape() {
+        let tape = temp_tape("coldeyes");
+        let _ = std::fs::remove_file(narrative_path_for(&tape));
+        let mem = FileMemory::new("", &tape, 5);
+        assert!(mem.cold_eyes_prompt().is_none(), "no narrative -> nothing to validate");
+        mem.record(&trace("what is my number", "42")).await.unwrap();
+        mem.set_narrative("The user's number is 42 and the sky is green.").unwrap();
+        let p = mem.cold_eyes_prompt().expect("a narrative exists -> a validation prompt");
+        assert!(p.contains("ground truth"), "the Tape-is-ground-truth framing");
+        assert!(p.contains("CONSISTENT"), "the consistent-reply token");
+        assert!(p.contains("sky is green"), "the narrative is included for review");
+        assert!(p.contains("42"), "the Tape facts are included");
         let _ = std::fs::remove_file(&tape);
         let _ = std::fs::remove_file(narrative_path_for(&tape));
     }
