@@ -119,10 +119,11 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   layers Ring-0 soul → Ring-3 narrative → Ring-2 recent; `consolidate()` returns a real **self-interview
   / forward-narrative** prompt over the prior narrative + recent turns (per `perpetual-memory.md`). +3
   tests; gate 117/5 green.
-  **A6.2 remaining** (deferred — model-dependent / higher-risk): wire the consolidation loop (a Driver/
-  threshold emits `consolidate()` → engine generates → L5 stores via `set_narrative`; generation needs
-  the model = a bounded/operator-verified step), the **cold-eyes validation** Step (diff narrative vs
-  Tape, I5), a swappable consolidation policy, Ring-1/Ring-4 (Ring-4 = the A3 embedder).
+  **A6.2 partial** (2026-06-15): the L5 consolidation trigger **`keel consolidate`** landed — builds the
+  self-interview prompt → routes it (**sovereign → local**) so the model authors the Ring-3 narrative →
+  stores via `set_narrative` (closes the loop). Live generation = model-dependent, deferred (operator/
+  bounded verify). Ring-4 = DONE (A3). **Remaining:** the **cold-eyes validation** Step (diff narrative
+  vs Tape, I5), a daemon auto-trigger (heartbeat → consolidate), a swappable consolidation policy, Ring-1.
 
 ### Phase B — Stage 3 (the flywheel; size to the base case, ignition is upside)
 - `[x] B2` · **`TraceSink` file impl** — DONE 2026-06-15. `keel-services::FileTraceSink` appends each

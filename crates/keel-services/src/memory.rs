@@ -325,7 +325,9 @@ impl Memory for FileMemory {
             kind: Kind::CoreWire,
             ty: "memory:consolidate".into(),
             trust_required: Trust::Normal,
-            data_class: DataClass::Normal,
+            // sovereign: consolidating personal turn-history stays on-box (forces local, I3) — a
+            // memory narrative may carry private context; privacy beats a stronger cloud summarizer.
+            data_class: DataClass::Sovereign,
             tier_history: vec![],
             oracle_failures: 0,
             projected_cost: None,

@@ -10,7 +10,8 @@
 //!   keel --think "…"      keel --manifest C:\KEEL\keel.lock "hello"
 
 use keel_contracts::{
-    Content, Context, DataClass, Driver, Effort, GenerateRequest, GenerateResult, Kind, Message, Role, Step, Trust,
+    Content, Context, DataClass, Driver, Effort, GenerateRequest, GenerateResult, Kind, Memory, Message, Role, Step,
+    Trust,
 };
 use keel_kernel::{new_context, Manifest};
 use keel_services::{HeartbeatDriver, WatchDriver};
@@ -42,6 +43,11 @@ async fn run() -> keel_contracts::Result<()> {
     // verified-trace corpus (B2) into chat-format training pairs for an out-of-band trainer (Unsloth).
     if std::env::args().nth(1).as_deref() == Some("distill-export") {
         return run_distill_export();
+    }
+    // `keel consolidate` — run one memory-consolidation turn (the model authors an updated Ring-3
+    // narrative over recent turns, then store it). Closes the perpetual-memory loop (canon §11); sovereign.
+    if std::env::args().nth(1).as_deref() == Some("consolidate") {
+        return run_consolidate().await;
     }
     let mut manifest_path = "keel.lock".to_string();
     let mut tier_override: Option<String> = None;
@@ -275,6 +281,40 @@ fn run_distill_export() -> keel_contracts::Result<()> {
     }
     std::fs::write(&output, &jsonl).map_err(|e| keel_contracts::KeelError::Other(format!("write {output}: {e}")))?;
     eprintln!("[keel] distill-export: {pairs} pair(s) {input} -> {output} (out-of-band trainer: Unsloth)");
+    Ok(())
+}
+
+/// `keel consolidate` — close the perpetual-memory loop (canon §11): build the self-interview prompt
+/// over recent turns, route it (sovereign → local) so the model authors an updated Ring-3 narrative,
+/// then store it via `set_narrative`. The narrative is model-authored (lossy); the Tape stays the facts.
+async fn run_consolidate() -> keel_contracts::Result<()> {
+    let mut manifest_path = "keel.lock".to_string();
+    let mut args = std::env::args().skip(2);
+    while let Some(a) = args.next() {
+        if a == "--manifest" {
+            manifest_path = args.next().unwrap_or_default();
+        }
+    }
+    let manifest = Manifest::load(&manifest_path)?;
+    let mut ctx = new_context(&manifest);
+    // a wider window for consolidation than the per-turn default.
+    let mem = keel_services::FileMemory::new("", keel::TAPE_PATH, 12);
+    let mut step = mem.consolidate().await?;
+    let engine = keel::Engine::assemble(&manifest)?;
+    let req = keel_kernel::engine::request_from_step(&step);
+    let outcome = engine.run(&mut step, &mut ctx, req).await?;
+    let narrative = outcome.result.content.trim();
+    if narrative.is_empty() {
+        eprintln!("[keel] consolidate: the model returned an empty narrative; not stored");
+        return Ok(());
+    }
+    mem.set_narrative(narrative)?;
+    eprintln!(
+        "[keel] consolidate: stored a {}-char Ring-3 narrative (tier {}, ${:.4})",
+        narrative.len(),
+        outcome.tier_used,
+        ctx.cost.total
+    );
     Ok(())
 }
 
