@@ -116,6 +116,27 @@ impl ChangeGate {
         }
         Self::dhash(&luma, w, h)
     }
+
+    /// Energy-based **VAD**: the voiced duration (ms) of a mono PCM buffer — the model-free signal the
+    /// audio gate ([`ChangeGate::audio_voiced`]) consumes (silence → 0 → never transcribed). Splits the
+    /// buffer into ~20 ms windows and sums the duration of those whose RMS amplitude exceeds
+    /// `rms_threshold` (i16 scale; ~300-1000 separates speech from a quiet room). No dep — the capture
+    /// organ feeds raw samples in.
+    pub fn voiced_ms(samples: &[i16], sample_rate: u32, rms_threshold: f64) -> u32 {
+        if sample_rate == 0 || samples.is_empty() {
+            return 0;
+        }
+        let window = (sample_rate / 50).max(1) as usize; // ~20 ms
+        let mut voiced = 0u32;
+        for chunk in samples.chunks(window) {
+            let sum_sq: f64 = chunk.iter().map(|&s| (s as f64) * (s as f64)).sum();
+            let rms = (sum_sq / chunk.len() as f64).sqrt();
+            if rms > rms_threshold {
+                voiced += (chunk.len() as u32 * 1000) / sample_rate;
+            }
+        }
+        voiced
+    }
 }
 
 /// A **stateful** frame change-gate — the capture organ's model-free dedup loop. It remembers the
@@ -345,6 +366,25 @@ mod tests {
         assert_eq!(p.content["frame"].as_str(), Some("frame-0"));
         assert!(see(&mut g, "frame-1", &flat, w, h, "screen", 2).is_none(), "static frame -> gated");
         assert!(see(&mut g, "frame-2", &grad, w, h, "screen", 3).is_some(), "visual change -> emits");
+    }
+
+    #[test]
+    fn voiced_ms_gates_silence_and_measures_speech() {
+        let rate = 16000u32;
+        // silence -> 0 voiced ms (never transcribed).
+        assert_eq!(ChangeGate::voiced_ms(&vec![0i16; rate as usize], rate, 300.0), 0);
+        // a loud 1s mono buffer -> ~1000 ms voiced.
+        let loud = vec![6000i16; rate as usize];
+        let v = ChangeGate::voiced_ms(&loud, rate, 300.0);
+        assert!((900..=1000).contains(&v), "loud 1s -> ~1000ms, got {v}");
+        // half silence + half loud -> ~500 ms.
+        let mut mixed = vec![0i16; (rate / 2) as usize];
+        mixed.extend(vec![6000i16; (rate / 2) as usize]);
+        let vm = ChangeGate::voiced_ms(&mixed, rate, 300.0);
+        assert!((400..=600).contains(&vm), "half-loud -> ~500ms, got {vm}");
+        // guards: empty / zero-rate -> 0, never a panic.
+        assert_eq!(ChangeGate::voiced_ms(&[], rate, 300.0), 0);
+        assert_eq!(ChangeGate::voiced_ms(&loud, 0, 300.0), 0);
     }
 
     // ── the hear() retina (canon §12): VAD-gate → whisper → Percept ──

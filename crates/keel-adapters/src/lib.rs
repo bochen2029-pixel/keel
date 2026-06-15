@@ -14,10 +14,16 @@
 pub mod anthropic;
 pub mod deepseek;
 pub mod local_llama;
+#[cfg(feature = "mic")]
+pub mod mic;
 pub mod openai;
+pub mod wav;
 pub mod whisper;
 
 pub use anthropic::Anthropic;
 pub use deepseek::DeepSeek;
 pub use local_llama::LocalLlama;
+#[cfg(feature = "mic")]
+pub use mic::Microphone;
+pub use wav::write_wav_i16;
 pub use whisper::Whisper;

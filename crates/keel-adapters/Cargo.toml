@@ -11,6 +11,12 @@ async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# the microphone capture organ (canon 12 ears), opt-in so the default core pulls no audio dependency.
+cpal = { version = "0.17", optional = true }
+
+[features]
+# enable the cpal microphone capture organ (keel-adapters::mic). Off by default (the minimal-core thesis).
+mic = ["dep:cpal"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
