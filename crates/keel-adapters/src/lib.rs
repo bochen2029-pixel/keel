@@ -13,6 +13,7 @@
 
 pub mod anthropic;
 pub mod deepseek;
+pub mod embed;
 pub mod local_llama;
 #[cfg(feature = "mic")]
 pub mod mic;
@@ -24,6 +25,7 @@ pub mod whisper;
 
 pub use anthropic::Anthropic;
 pub use deepseek::DeepSeek;
+pub use embed::Embedder;
 pub use local_llama::LocalLlama;
 #[cfg(feature = "mic")]
 pub use mic::Microphone;

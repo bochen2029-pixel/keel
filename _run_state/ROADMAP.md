@@ -96,12 +96,14 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   persistent Tape/ledger/egress/display. The no-SSN I5 stopgap is retired (engine `baseline` wired
   `None`; the slot stays a generic always-on extra-oracle seam, excluded from #3). **Decided
   mask-all-output** (genome state-hygiene default; a cell can swap a no-op redactor). +1 test; 123/5 green.
-- `[G] A3` · **embedder + `GOLDEN_RECALL`** — **format-committing (ADR #13) → ISSUE-1 operator
-  design-review FIRST.** Proposed shape: embed adapter = HTTP to llama-server `/v1/embeddings`
-  (Qwen3-Embedding-0.6B, model at `C:\models`) reusing the `openai` mapping; `sqlite-vec` vector index
-  in `keel-store`; the index **fingerprint** `(id,dim)` with **rebuild-from-ledger on mismatch**;
-  reranker ships **OFF**/identity (Qwen3-Reranker-0.6B). **Done =** `GOLDEN_RECALL` green + the
-  fingerprint guard + sovereign-local (vectors never egress, I3). **New dep:** `sqlite-vec`.
+- `[~] A3` · **embedder + `GOLDEN_RECALL`** — FIRST PASS DONE 2026-06-15 (ISSUE-1 decided autonomously:
+  **brute-force cosine, NO `sqlite-vec`** — an L1 memory is small; sqlite-vec is a deferred scale opt).
+  Built `keel-adapters::Embedder` (HTTP `/v1/embeddings`, sovereign-local — vectors never egress, I3;
+  live `#[ignore]`'d) + `keel-services::recall` (`cosine` · `recall_top_k` brute force · `Fingerprint{id,dim}`
+  + `should_rebuild`). **`GOLDEN_RECALL` deterministic case GREEN** (`passes_golden_recall_fingerprint`:
+  mismatch → no-serve + rebuild-from-ledger). **No new dep.** +3 tests. **Remaining:** the recall@k/ndcg
+  **uplift** cases = the C1/C2 falsifiers (real embeddings, later); wire Ring-4 retrieval into
+  `FileMemory::assemble` (live embed — deferred).
 - `[G] A5` · **privacy rung-3** — OpenAI Privacy Filter via `ort`/ONNX (in-process, NOT GGUF), behind
   `GOLDEN_PRIVACY`; additive recall, **never the guarantee** (rungs 1-2 carry it). **Operator: least
   urgent / LAST.** **New dep:** `ort` (heavy native). → ISSUE-2.
@@ -192,6 +194,9 @@ just post-DONE, to catch drift early.)*
   PROPOSE the fingerprint / `sqlite-vec` / embed-adapter design (append it here) for the operator's OK
   **before** committing the index format. Until OK'd → skip A3; do A1/A2/A4/B2/etc. Models +
   HF links: Qwen3-Embedding-0.6B, Qwen3-Reranker-0.6B (operator's note; at `C:\models`).
+  **RESOLVED 2026-06-15** (per "decide, never ask"): chose **brute-force cosine, NO `sqlite-vec`**;
+  fingerprint `(embedder_id, dim)` + rebuild-from-ledger on mismatch. A3 first pass landed; sqlite-vec
+  revisited only if memory size makes brute force slow.
 - **ISSUE-2 [operator · least-urgent/LAST]** — A5 privacy rung-3 needs `ort` (heavy native) + is the
   operator's explicit last item. Defer to the end; `openai/privacy-filter` model at `C:\models`.
 - **ISSUE-3 [operator-review]** — A6 memory narrative register = the highest-risk seam-cut; reserved
