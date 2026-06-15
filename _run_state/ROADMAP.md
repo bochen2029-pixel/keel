@@ -151,8 +151,10 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
 ### Phase C — the §23 falsifiers (check + DECIDE each; a decision is the deliverable)
 - `[?] C1` reranker vs identity on `GOLDEN_RECALL` → keep OFF or turn ON. (after A3) — **STATUS
   2026-06-15:** the embed organ + brute-force cosine recall + fingerprint golden are built (A3); the
-  recall@k **uplift** benchmark needs the embed model served + a labeled set = a focused live session
-  (the embed-server setup is stuck-prone unattended → deferred per pivot-when-stuck, not blocking).
+  recall@k **uplift** benchmark needs the embed model served + a labeled set. **HARD BLOCKER found
+  2026-06-15: the Qwen3-Embedding-0.6B GGUF is NOT in `C:\models`** (only the reranker
+  `qwen3-reranker-0.6b-q8_0.gguf` is present) — the benchmark cannot run until the operator provides it.
+  → ISSUE-10. (The embed *organ* + recall + fingerprint golden are built + unit-tested regardless.)
 - `[?] C2` embedder vs the MiniLM floor → keep floor or upgrade. (after A3) — same as C1 (needs the live
   embed benchmark; deferred to a focused session).
 - `[?] C3` privacy model vs deterministic-only on `GOLDEN_PRIVACY`. (after A5)
@@ -253,6 +255,11 @@ just post-DONE, to catch drift early.)*
   see a turn's `sovereign` class (it only sees request/response), so one default must be chosen. A6.1
   made this sharper (the Tape now persists outputs). **RESOLVED 2026-06-15:** per the operator's "decide
 with common sense, never ask" directive, chose **mask-all-output** (state-hygiene default) and built A4.
+- **ISSUE-10 [operator — missing model]** — the **Qwen3-Embedding-0.6B GGUF is absent from `C:\models`**
+  (only `qwen3-reranker-0.6b-q8_0.gguf` is there); discovered 2026-06-15 attempting the C1/C2 recall
+  benchmark. The A3 embed organ + recall + fingerprint golden are built/tested, but no live embed /
+  recall-uplift benchmark / Ring-4 live wiring can run until the operator downloads the embed model.
+  Unblocks: C1, C2, A3-live, Ring-4-live.
 - *(Append new issues as discovered, each: `ISSUE-N [type] — description · what unblocks it`. If the
   loop STALLS — only `[G]`/`[!]`/`[?]` slices remain and none can advance — write `.keelstate/STALLED`
   with the reason so the supervisor stops respawning, and the operator resolves the queue on next look.)*
