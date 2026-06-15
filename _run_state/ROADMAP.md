@@ -61,18 +61,20 @@ ledger + SQLite Spine · CLI + `serve_openai` · substrate resolver) **✅**. St
 ears + `hear()` · `svc::driver` initiative + the daemon `select`/`tick`/`run_until_idle`) **✅**.
 Stage 2 partial (`metrics` · `svc::memory` minimal persistent Tape · config-from-`keel.lock` · ears
 **cpal mic** capture + eyes **xcap screen** capture, both feature-gated → the native Qwen vision /
-Whisper) **✅**. **110 tests green / 5 ignored; seal `db4377b3`; public.** (Latest commits: see `git`.)
+Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Latest commits: see `git`.) Phase A: A1 ✅.
 
 ---
 
 ## 2 · THE PLAN (NOW → DONE), dependency-ordered
 
 ### Phase A — Stage 2 completion
-- `[ ] A1` · **`listen()` + `see_screen()` retina wrappers** (svc::perception) — bundle
-  capture→gate→organ→`Percept`: `listen()` = mic(cpal)→`voiced_ms`→`write_wav`→whisper→Audio
-  `Percept`; `see_screen()` = screen(xcap)→`FrameGate`→Image `Percept`. **Done =** both behind their
-  features, +unit tests (silence/static gated), live `#[ignore]`'d. **Deps:** none (capture + gates
-  exist). **No new dep.** Needs the `mic`/`screen` features wired into `keel-services`.
+- `[x] A1` · **`listen()` + `see_screen()` retina wrappers** (svc::perception) — DONE 2026-06-14.
+  `listen()` (`#[cfg(feature="mic")]`) = mic(cpal)→`voiced_ms` VAD-gate (silence short-circuits)
+  →`resample_to_16k` (no-dep linear)→`write_wav`→whisper→Audio `Percept`; `see_screen()`
+  (`#[cfg(feature="screen")]`) = screen(xcap)→`FrameGate`→`see()`→Image `Percept`. Factored the
+  hardware-free `listen_from_samples` so the silence-gate is unit-tested without a mic; live paths
+  `#[ignore]`'d. `mic`/`screen` features forwarded keel-adapters→keel-services. **No new dep.** +2
+  unit + 2 feature-gated live. Gate: 112/5 green, clippy clean (default + both features).
 - `[ ] A2` · **the Driver daemon (L5)** — the continuously-running select-loop over `run_until_idle`:
   `keel daemon [--max-ticks N | --watch] [--interval ms]` polls the wired drivers → runs each emitted
   `Step` through the engine → idles. **Done =** a bounded live daemon runs N ticks end-to-end (lived),

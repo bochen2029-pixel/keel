@@ -15,9 +15,10 @@
 //! follow-on; the `see()` captioning retina rides the cognition protocol (a frame is multi-part image
 //! content, §12) and lands with it.
 
-use keel_adapters::Whisper;
-use keel_contracts::{Modality, Percept, Result, Time};
+use keel_adapters::{write_wav_i16, Whisper};
+use keel_contracts::{KeelError, Modality, Percept, Result, Time};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The perceptual-hash (dHash) Hamming distance above which a frame counts as "changed" (canon §12,
 /// calibrated ~4). At or below it, consecutive frames are treated as identical and the model is NOT
@@ -231,6 +232,102 @@ pub async fn hear(
     Ok(Some(percept_from_transcript(transcript, source, t_utc)))
 }
 
+/// A sensible default RMS amplitude threshold (i16 scale) separating speech from a quiet room — the VAD
+/// floor for the `listen` retina / [`ChangeGate::voiced_ms`]. ~300 is conservative; a noisy room wants
+/// higher. Cells tune it via the `rms_threshold` argument.
+pub const VOICE_RMS_THRESHOLD: f64 = 300.0;
+
+/// A per-process disambiguator so concurrent captures never collide on the temp WAV path (no dep,
+/// no clock/RNG needed).
+static LISTEN_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// Linear-resample mono `i16` PCM to **16 kHz** — the rate the whisper organ expects (canon §12).
+/// Pass-through when already 16 kHz. No dep (pure arithmetic, like the rest of this gate); a
+/// no-anti-alias linear approximation whisper is robust to for speech — a polyphase resampler is a
+/// later enrichment if transcription quality ever warrants (the mic organ captures at the device's
+/// native rate and asks the caller to resample, so this honors that contract). Empty input or
+/// `rate == 0` → empty.
+pub fn resample_to_16k(samples: &[i16], rate: u32) -> Vec<i16> {
+    const TARGET: u32 = 16_000;
+    if rate == 0 || samples.is_empty() {
+        return Vec::new();
+    }
+    if rate == TARGET {
+        return samples.to_vec();
+    }
+    let out_len = (samples.len() as u64 * TARGET as u64 / rate as u64) as usize;
+    let last = samples.len() - 1;
+    (0..out_len)
+        .map(|i| {
+            // map output index → source position, then linearly interpolate the two nearest samples.
+            let src = i as f64 * rate as f64 / TARGET as f64;
+            let i0 = src.floor() as usize; // src < samples.len() by construction (see out_len)
+            let i1 = (i0 + 1).min(last);
+            let frac = src - i0 as f64;
+            (samples[i0] as f64 * (1.0 - frac) + samples[i1] as f64 * frac).round() as i16
+        })
+        .collect()
+}
+
+/// The hardware-free core of the `listen` retina: VAD-gate raw mono samples → silence short-circuits
+/// (no WAV written, whisper never touched) → resample to 16 kHz → write a canonical WAV → transcribe
+/// via [`hear`] → an Audio [`Percept`]. Separated from capture so the **silence-gating** path is
+/// unit-tested without a mic (the voiced path needs the local whisper binary — a live, `#[ignore]`'d
+/// test). `source` = capture topology ("mic"); `t_utc` is stamped by the caller. **Sovereign + local.**
+pub async fn listen_from_samples(
+    whisper: &Whisper,
+    samples: &[i16],
+    rate: u32,
+    rms_threshold: f64,
+    source: &str,
+    t_utc: Time,
+) -> Result<Option<Percept>> {
+    let voiced = ChangeGate::voiced_ms(samples, rate, rms_threshold);
+    if !ChangeGate::audio_voiced(voiced) {
+        return Ok(None); // silence is VAD-gated: never written, never transcribed (NFR §19 thrift)
+    }
+    let pcm16k = resample_to_16k(samples, rate);
+    let seq = LISTEN_SEQ.fetch_add(1, Ordering::Relaxed);
+    let wav = std::env::temp_dir().join(format!("keel_listen_{}_{}_{}.wav", std::process::id(), t_utc, seq));
+    write_wav_i16(&wav, &pcm16k, 16_000, 1).map_err(|e| KeelError::Other(format!("listen: write wav: {e}")))?;
+    let percept = hear(whisper, &wav, voiced, source, t_utc).await;
+    let _ = std::fs::remove_file(&wav); // best-effort cleanup; the transcript is already captured
+    percept
+}
+
+/// The **`listen()` retina** (canon §12): capture ~`seconds` from the default mic (cpal) →
+/// [`listen_from_samples`] (VAD-gate → resample → whisper → `Percept`). **Sovereign + local** — raw
+/// audio never leaves the box (I3). Behind the `mic` feature so the default genome core pulls no audio
+/// dependency (the minimal-core thesis, §3.5). Silence returns `None` (free); `source` = "mic".
+#[cfg(feature = "mic")]
+pub async fn listen(
+    whisper: &Whisper,
+    seconds: u32,
+    rms_threshold: f64,
+    source: &str,
+    t_utc: Time,
+) -> Result<Option<Percept>> {
+    let (samples, rate) = keel_adapters::Microphone::capture(seconds)?;
+    listen_from_samples(whisper, &samples, rate, rms_threshold, source, t_utc).await
+}
+
+/// The **`see_screen()` retina** (canon §12): grab the primary monitor (xcap) → the dHash [`FrameGate`]
+/// → an Image [`Percept`] on visual change (a static screen returns `None`, GPU-free — the cognition
+/// model is never re-consulted). **Sovereign + local** — raw frames never egress (I3); the changed
+/// frame rides the cognition protocol to the native Qwen vision downstream (image content forces
+/// `local`). Behind the `screen` feature (minimal-core, §3.5). `gate` carries the last-emitted hash
+/// across calls; `source` = "screen".
+#[cfg(feature = "screen")]
+pub fn see_screen(
+    gate: &mut FrameGate,
+    frame_ref: impl Into<String>,
+    source: &str,
+    t_utc: Time,
+) -> Result<Option<Percept>> {
+    let (rgba, w, h) = keel_adapters::ScreenCapture::grab()?;
+    Ok(see(gate, frame_ref, &rgba, w, h, source, t_utc))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -406,6 +503,36 @@ mod tests {
         assert_eq!(p.content["text"].as_str(), Some("hello world"));
     }
 
+    // ── the listen() retina core: resample + silence-gating (model-free, no mic needed) ──
+
+    #[test]
+    fn resample_to_16k_passes_through_and_downsamples() {
+        // already 16 kHz → identical (no DSP touches it).
+        let s = vec![1i16, 2, 3, 4, 5];
+        assert_eq!(resample_to_16k(&s, 16_000), s);
+        // 48 kHz 1s → ~16000 samples (~1/3).
+        let loud = vec![5000i16; 48_000];
+        let out = resample_to_16k(&loud, 48_000);
+        assert!((15_900..=16_000).contains(&out.len()), "48k 1s → ~16000 samples, got {}", out.len());
+        // a constant signal stays ~constant through linear interpolation (no overflow, no drift).
+        assert!(out.iter().all(|&v| (4900..=5100).contains(&v)), "constant preserved");
+        // upsample 8 kHz → 16 kHz is ~2x.
+        assert_eq!(resample_to_16k(&vec![3i16; 8_000], 8_000).len(), 16_000);
+        // guards: empty / zero-rate → empty, never a panic.
+        assert!(resample_to_16k(&[], 48_000).is_empty());
+        assert!(resample_to_16k(&loud, 0).is_empty());
+    }
+
+    #[tokio::test]
+    async fn listen_from_samples_gates_silence_without_transcribing() {
+        // silence (RMS below threshold) → None: the whisper organ is never touched (dummy paths fine),
+        // no WAV is written. The voiced path needs the real binary → the live test below.
+        let w = keel_adapters::Whisper::new("no-such-cli", "no-such-model");
+        let silence = vec![0i16; 16_000];
+        let p = listen_from_samples(&w, &silence, 16_000, VOICE_RMS_THRESHOLD, "mic", 7).await.unwrap();
+        assert!(p.is_none(), "silence is VAD-gated → no Percept, no transcription, no WAV");
+    }
+
     /// Live: VAD-voiced audio is transcribed by the real whisper organ. Ignored by default (needs the
     /// model + a WAV); fix the paths and run with `-- --ignored`.
     #[tokio::test]
@@ -414,5 +541,28 @@ mod tests {
         let w = keel_adapters::Whisper::new(r"C:\whisper.cpp\whisper-cli.exe", r"C:\models\ggml-large-v3-turbo.bin");
         let p = hear(&w, std::path::Path::new(r"C:\whisper.cpp\samples\jfk.wav"), 1000, "mic", 0).await.unwrap();
         assert!(p.is_some(), "voiced audio transcribes to a Percept");
+    }
+
+    /// Live: capture from a real mic → transcribe end-to-end. Ignored + behind `mic`; run with
+    /// `cargo test -p keel-services --features mic -- --ignored` on a box with a microphone (speak
+    /// during the ~3 s window).
+    #[cfg(feature = "mic")]
+    #[tokio::test]
+    #[ignore]
+    async fn live_listen_captures_and_transcribes() {
+        let w = keel_adapters::Whisper::new(r"C:\whisper.cpp\whisper-cli.exe", r"C:\models\ggml-large-v3-turbo.bin");
+        let p = listen(&w, 3, VOICE_RMS_THRESHOLD, "mic", 0).await.unwrap();
+        assert!(p.is_some(), "speaking during capture → a transcribed Audio Percept");
+    }
+
+    /// Live: grab a real screen → gate → Image Percept. Ignored + behind `screen`; run with
+    /// `cargo test -p keel-services --features screen -- --ignored` on a box with a display.
+    #[cfg(feature = "screen")]
+    #[test]
+    fn live_see_screen_grabs_and_emits() {
+        let mut g = FrameGate::default();
+        let p = see_screen(&mut g, "frame-0", "screen", 1).expect("grab the primary monitor");
+        assert!(p.is_some(), "the first frame is the baseline → an Image Percept");
+        assert_eq!(p.unwrap().modality, Modality::Image);
     }
 }

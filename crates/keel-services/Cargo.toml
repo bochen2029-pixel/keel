@@ -15,5 +15,13 @@ serde_json = "1"
 # SchemaOracle validates in-memory only — no network egress (I3) in a safety-critical oracle.
 jsonschema = { version = "0.46.5", default-features = false }
 
+[features]
+# the listen() retina: pull keel-adapters' cpal microphone capture organ (canon §12 ears). Off by
+# default — the minimal-core thesis (a consumer that never hears pays no audio dependency).
+mic = ["keel-adapters/mic"]
+# the see_screen() retina: pull keel-adapters' xcap screen capture organ (canon §12 eyes). Off by
+# default (minimal-core, §3.5).
+screen = ["keel-adapters/screen"]
+
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }
