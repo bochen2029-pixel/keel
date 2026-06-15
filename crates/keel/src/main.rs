@@ -159,6 +159,7 @@ async fn run_daemon() -> keel_contracts::Result<()> {
     let mut prompt = "daemon heartbeat tick: briefly note KEEL is alive.".to_string();
     let mut core_wire = false;
     let mut sovereign = false;
+    let mut consolidate_every: usize = 0; // 0 = off; every N ticks, self-consolidate memory (canon §8/§11)
     let mut args = std::env::args().skip(2); // skip "keel" + "daemon"
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -172,6 +173,7 @@ async fn run_daemon() -> keel_contracts::Result<()> {
             "--prompt" => prompt = args.next().unwrap_or(prompt),
             "--kind" => core_wire = matches!(args.next().as_deref(), Some("core-wire") | Some("core_wire")),
             "--sovereign" => sovereign = true,
+            "--consolidate-every" => consolidate_every = args.next().and_then(|n| n.parse().ok()).unwrap_or(0),
             _ => {}
         }
     }
@@ -179,6 +181,8 @@ async fn run_daemon() -> keel_contracts::Result<()> {
     let manifest = Manifest::load(&manifest_path)?;
     let mut ctx = new_context(&manifest);
     let engine = keel::Engine::assemble(&manifest)?;
+    // a memory handle for `--consolidate-every` self-consolidation (same Tape as the engine's memory).
+    let mem = keel_services::FileMemory::new("", keel::TAPE_PATH, 12);
 
     // the template Step each self-initiated tick carries; the Driver stamps `Step.source` (canon §7).
     let template = Step {
@@ -221,6 +225,16 @@ async fn run_daemon() -> keel_contracts::Result<()> {
             Ok(Some(outcome)) => {
                 ran += 1;
                 report_daemon(ran, &outcome, &ctx);
+                // canon §8/§11: a self that acts AND compresses — every N ticks, self-consolidate memory
+                // (a distinct trace_id so it checkpoints as its own run, not the tick's).
+                if consolidate_every > 0 && ran % consolidate_every == 0 {
+                    ctx.trace_id = format!("{base}-consolidate-{ran}");
+                    match do_consolidation(&engine, &mem, &mut ctx).await {
+                        Ok(n) if n > 0 => eprintln!("[keel] daemon: self-consolidated memory ({n}-char Ring-3 narrative)"),
+                        Ok(_) => {}
+                        Err(e) => eprintln!("[keel] daemon: consolidation error: {e}"),
+                    }
+                }
                 if !perpetual && ran >= max_ticks {
                     break;
                 }
@@ -284,9 +298,27 @@ fn run_distill_export() -> keel_contracts::Result<()> {
     Ok(())
 }
 
-/// `keel consolidate` — close the perpetual-memory loop (canon §11): build the self-interview prompt
-/// over recent turns, route it (sovereign → local) so the model authors an updated Ring-3 narrative,
-/// then store it via `set_narrative`. The narrative is model-authored (lossy); the Tape stays the facts.
+/// One memory-consolidation turn (canon §11): build the self-interview prompt → route it (sovereign →
+/// local) so the model authors the Ring-3 narrative → store it via `set_narrative`. Returns the stored
+/// length (0 = empty, not stored). Shared by `keel consolidate` and the daemon's self-consolidation.
+async fn do_consolidation(
+    engine: &keel::Engine,
+    mem: &keel_services::FileMemory,
+    ctx: &mut Context,
+) -> keel_contracts::Result<usize> {
+    let mut step = mem.consolidate().await?;
+    let req = keel_kernel::engine::request_from_step(&step);
+    let outcome = engine.run(&mut step, ctx, req).await?;
+    let narrative = outcome.result.content.trim();
+    if narrative.is_empty() {
+        return Ok(0);
+    }
+    mem.set_narrative(narrative)?;
+    Ok(narrative.len())
+}
+
+/// `keel consolidate` — close the perpetual-memory loop (canon §11): one [`do_consolidation`] turn, then
+/// report. The narrative is model-authored (lossy); the Tape stays the facts.
 async fn run_consolidate() -> keel_contracts::Result<()> {
     let mut manifest_path = "keel.lock".to_string();
     let mut args = std::env::args().skip(2);
@@ -297,24 +329,12 @@ async fn run_consolidate() -> keel_contracts::Result<()> {
     }
     let manifest = Manifest::load(&manifest_path)?;
     let mut ctx = new_context(&manifest);
-    // a wider window for consolidation than the per-turn default.
-    let mem = keel_services::FileMemory::new("", keel::TAPE_PATH, 12);
-    let mut step = mem.consolidate().await?;
+    let mem = keel_services::FileMemory::new("", keel::TAPE_PATH, 12); // a wider window for consolidation
     let engine = keel::Engine::assemble(&manifest)?;
-    let req = keel_kernel::engine::request_from_step(&step);
-    let outcome = engine.run(&mut step, &mut ctx, req).await?;
-    let narrative = outcome.result.content.trim();
-    if narrative.is_empty() {
-        eprintln!("[keel] consolidate: the model returned an empty narrative; not stored");
-        return Ok(());
+    match do_consolidation(&engine, &mem, &mut ctx).await? {
+        0 => eprintln!("[keel] consolidate: the model returned an empty narrative; not stored"),
+        n => eprintln!("[keel] consolidate: stored a {n}-char Ring-3 narrative (${:.4})", ctx.cost.total),
     }
-    mem.set_narrative(narrative)?;
-    eprintln!(
-        "[keel] consolidate: stored a {}-char Ring-3 narrative (tier {}, ${:.4})",
-        narrative.len(),
-        outcome.tier_used,
-        ctx.cost.total
-    );
     Ok(())
 }
 

@@ -123,7 +123,8 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   self-interview prompt → routes it (**sovereign → local**) so the model authors the Ring-3 narrative →
   stores via `set_narrative` (closes the loop). Live generation = model-dependent, deferred (operator/
   bounded verify). Ring-4 = DONE (A3). **Remaining:** the **cold-eyes validation** Step (diff narrative
-  vs Tape, I5), a daemon auto-trigger (heartbeat → consolidate), a swappable consolidation policy, Ring-1.
+  vs Tape, I5), a swappable consolidation policy, Ring-1. (**Daemon auto-trigger DONE 2026-06-15:**
+  `keel daemon --consolidate-every N` self-consolidates every N ticks — a self that acts AND compresses.)
 
 ### Phase B — Stage 3 (the flywheel; size to the base case, ignition is upside)
 - `[x] B2` · **`TraceSink` file impl** — DONE 2026-06-15. `keel-services::FileTraceSink` appends each
