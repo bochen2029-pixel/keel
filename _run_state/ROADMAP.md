@@ -102,8 +102,11 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   live `#[ignore]`'d) + `keel-services::recall` (`cosine` · `recall_top_k` brute force · `Fingerprint{id,dim}`
   + `should_rebuild`). **`GOLDEN_RECALL` deterministic case GREEN** (`passes_golden_recall_fingerprint`:
   mismatch → no-serve + rebuild-from-ledger). **No new dep.** +3 tests. **Remaining:** the recall@k/ndcg
-  **uplift** cases = the C1/C2 falsifiers (real embeddings, later); wire Ring-4 retrieval into
-  `FileMemory::assemble` (live embed — deferred).
+  **uplift** cases = the C1/C2 falsifiers (real embeddings, later). **Ring-4 WIRED 2026-06-15:**
+  `FileMemory::with_embedder` (the `Embed` seam — stub-testable) + `assemble` embeds the query → cosine
+  top-k from the `.vec.jsonl` sidecar → injects "Relevant earlier" (dedup vs Ring-2); embed-on-record;
+  fingerprint-mismatch clears the stale sidecar. **Opt-in** (genome default off — no live embed dep).
+  +3 tests. Remaining: the C1/C2 uplift falsifiers (model) + a live/default embed wiring.
 - `[G] A5` · **privacy rung-3** — OpenAI Privacy Filter via `ort`/ONNX (in-process, NOT GGUF), behind
   `GOLDEN_PRIVACY`; additive recall, **never the guarantee** (rungs 1-2 carry it). **Operator: least
   urgent / LAST.** **New dep:** `ort` (heavy native). → ISSUE-2.

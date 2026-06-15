@@ -8,6 +8,24 @@
 //! lossless Tape), so a stale index never returns garbage — `GOLDEN_RECALL`'s deterministic case. (The
 //! recall@k / ndcg *uplift* cases are the §23 C1/C2 falsifiers, measured with real embeddings later.)
 
+use async_trait::async_trait;
+use keel_contracts::Result;
+
+/// The embed seam (a Memory **organ**, not a tier). A keel-services-local trait so `FileMemory` can hold
+/// a `dyn Embed` and tests can stub it without a live model; the real impl is `keel_adapters::Embedder`
+/// (HTTP `/v1/embeddings`). Text → a sovereign dense vector (vectors are invertible, never egress, I3).
+#[async_trait]
+pub trait Embed: Send + Sync {
+    async fn embed_text(&self, text: &str) -> Result<Vec<f32>>;
+}
+
+#[async_trait]
+impl Embed for keel_adapters::Embedder {
+    async fn embed_text(&self, text: &str) -> Result<Vec<f32>> {
+        self.embed(text).await // inherent method (takes resolution priority — no recursion)
+    }
+}
+
 /// The embedder fingerprint that commits the index format (canon §11): the model id + the vector dim.
 /// The vectors are derived from a specific embedder; reading them with another is meaningless.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -34,12 +34,13 @@
 //! - **Capture-sanctity early-record** (a two-phase Tape write: the step pre-cognition, the verdict
 //!   after); today the full `Trace` is recorded post-verify alongside the checkpoint.
 
+use crate::recall::{cosine, Embed, Fingerprint};
 use async_trait::async_trait;
 use keel_contracts::{
     AssembledContext, Content, Context, DataClass, KeelError, Kind, Memory, Result, Step, Trace, Trust,
 };
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// A file-backed [`Memory`] over the append-only **Tape** (canon §11). The Tape is the lossless
 /// system of record; the SQLite index (the `Spine`) is the derived, rebuildable checkpoint.
@@ -54,6 +55,14 @@ pub struct FileMemory {
     narrative: PathBuf,
     /// How many recent turns (Ring-2 working memory) `assemble` reads back from the Tape.
     working_turns: usize,
+    /// Ring-4 retrieval (optional, canon §11): the embed organ. `None` = no semantic recall (the bare
+    /// genome default — recall is opt-in, like a cell wiring the embedder).
+    embedder: Option<Arc<dyn Embed>>,
+    /// The Ring-4 vector sidecar (`<tape_stem>.vec.jsonl`): `{text, vec}` per recorded turn. Derived +
+    /// rebuildable from the Tape; cleared on an embedder fingerprint mismatch (never serve stale, §11).
+    vecs: PathBuf,
+    /// How many semantically-relevant earlier turns Ring-4 injects (0 = off).
+    recall_k: usize,
     /// Serializes appends within a process (the Tape is also crash-safe per JSONL line).
     lock: Mutex<()>,
 }
@@ -65,7 +74,56 @@ impl FileMemory {
     pub fn new(soul: impl Into<String>, tape: impl Into<PathBuf>, working_turns: usize) -> Self {
         let tape = tape.into();
         let narrative = narrative_path_for(&tape);
-        Self { soul: soul.into(), tape, narrative, working_turns, lock: Mutex::new(()) }
+        let vecs = vec_path_for(&tape);
+        Self { soul: soul.into(), tape, narrative, working_turns, embedder: None, vecs, recall_k: 0, lock: Mutex::new(()) }
+    }
+
+    /// Wire **Ring-4 semantic recall** (canon §11): an embed organ + how many relevant earlier turns to
+    /// inject. The `fp` commits the vector sidecar's format; on a fingerprint mismatch the stale sidecar
+    /// is cleared (never serve a mismatched index — `GOLDEN_RECALL`), to be rebuilt from the Tape as new
+    /// turns are recorded. Recall is opt-in: without this, memory is Ring-0/2/3 only (no embed dependency).
+    pub fn with_embedder(mut self, embedder: Arc<dyn Embed>, fp: Fingerprint, recall_k: usize) -> Self {
+        // fingerprint guard: a sidecar from a different embedder is meaningless → clear it (don't serve stale).
+        let fp_file = self.vecs.with_extension("fp");
+        let prev = std::fs::read_to_string(&fp_file).ok().map(|s| s.trim().to_string());
+        let now = format!("{}:{}", fp.embedder, fp.dim);
+        if prev.as_deref() != Some(now.as_str()) {
+            let _ = std::fs::remove_file(&self.vecs); // rebuild-from-ledger as turns re-accumulate
+            if let Some(d) = fp_file.parent() {
+                let _ = std::fs::create_dir_all(d);
+            }
+            let _ = std::fs::write(&fp_file, &now);
+        }
+        self.embedder = Some(embedder);
+        self.recall_k = recall_k;
+        self
+    }
+
+    /// Append a `{text, vec}` line to the Ring-4 sidecar (best-effort; recall is non-critical, so a
+    /// sidecar write never fails a turn — the lossless Tape is the system of record).
+    fn append_vec(&self, text: &str, vec: &[f32]) {
+        let line = serde_json::json!({ "text": text, "vec": vec }).to_string();
+        let _g = self.lock.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(dir) = self.vecs.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&self.vecs) {
+            use std::io::Write;
+            let _ = writeln!(f, "{line}");
+        }
+    }
+
+    /// Read the Ring-4 sidecar as `(text, vec)` pairs (best-effort; a missing/garbled line is skipped).
+    fn read_vecs(&self) -> Vec<(String, Vec<f32>)> {
+        let Ok(raw) = std::fs::read_to_string(&self.vecs) else { return Vec::new() };
+        raw.lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .filter_map(|v| {
+                let text = v["text"].as_str()?.to_string();
+                let vec: Vec<f32> = v["vec"].as_array()?.iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect();
+                Some((text, vec))
+            })
+            .collect()
     }
 
     /// The Ring-3 narrative register (the model-authored compressed arc), trimmed; `None` when absent or
@@ -154,12 +212,21 @@ fn narrative_path_for(tape: &Path) -> PathBuf {
     p
 }
 
+/// The Ring-4 vector sidecar path for a Tape: `<tape_dir>/<tape_stem>.vec.jsonl` (the fingerprint lives
+/// alongside as `.vec.fp`). Keyed to the Tape stem so distinct Tapes get distinct, co-located sidecars.
+fn vec_path_for(tape: &Path) -> PathBuf {
+    let stem = tape.file_stem().and_then(|s| s.to_str()).unwrap_or("tape");
+    let mut p = tape.to_path_buf();
+    p.set_file_name(format!("{stem}.vec.jsonl"));
+    p
+}
+
 #[async_trait]
 impl Memory for FileMemory {
     /// Ring-0 (soul) + Ring-2 (recent working turns from the Tape), folded into the `system` preamble
     /// the engine prepends. Empty when there is no soul and no history (a fresh first turn) — the
     /// engine then prepends nothing.
-    async fn assemble(&self, _step: &Step, _ctx: &Context) -> Result<AssembledContext> {
+    async fn assemble(&self, step: &Step, _ctx: &Context) -> Result<AssembledContext> {
         let mut system = self.soul.clone(); // Ring-0 (soul / persona — empty for the bare genome)
         // Ring-3: the model-authored narrative arc (lossy; facts of record stay in the Tape, I5).
         if let Some(narrative) = self.narrative() {
@@ -169,8 +236,40 @@ impl Memory for FileMemory {
             system.push_str("Narrative so far (your compressed memory; facts of record live in the Tape):\n");
             system.push_str(&narrative);
         }
-        // Ring-2: the recent working turns, read back from the Tape (chronological).
         let recent = self.recent_traces(self.working_turns);
+        // Ring-4: semantically-relevant EARLIER turns (canon §11) — embed the current query, cosine-rank
+        // the vector sidecar, inject the top-k (excluding those already in Ring-2). Opt-in (needs an embedder).
+        if self.recall_k > 0 {
+            if let Some(embedder) = &self.embedder {
+                if let Some(query) = step.content.iter().find_map(|c| match c {
+                    Content::Text { text } if !text.trim().is_empty() => Some(text.trim()),
+                    _ => None,
+                }) {
+                    if let Ok(qv) = embedder.embed_text(query).await {
+                        let recent_set: std::collections::HashSet<String> = recent.iter().map(Self::summarize).collect();
+                        let mut scored: Vec<(f32, String)> = self
+                            .read_vecs()
+                            .into_iter()
+                            .filter(|(t, _)| !recent_set.contains(t))
+                            .map(|(t, v)| (cosine(&qv, &v), t))
+                            .collect();
+                        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                        let picks: Vec<String> = scored.into_iter().take(self.recall_k).map(|(_, t)| t).collect();
+                        if !picks.is_empty() {
+                            if !system.is_empty() {
+                                system.push_str("\n\n");
+                            }
+                            system.push_str("Relevant earlier (semantic recall):");
+                            for p in &picks {
+                                system.push('\n');
+                                system.push_str(p);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Ring-2: the recent working turns, read back from the Tape (chronological).
         if !recent.is_empty() {
             if !system.is_empty() {
                 system.push_str("\n\n");
@@ -188,19 +287,29 @@ impl Memory for FileMemory {
     async fn record(&self, trace: &Trace) -> Result<()> {
         use std::io::Write;
         let line = serde_json::to_string(trace).map_err(|e| KeelError::Other(format!("tape encode: {e}")))?;
-        // poison-tolerant: a panicked holder must not wedge the Tape (recover the guard).
-        let _g = self.lock.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(dir) = self.tape.parent() {
-            if !dir.as_os_str().is_empty() {
-                std::fs::create_dir_all(dir).map_err(|e| KeelError::Other(format!("tape dir: {e}")))?;
+        {
+            // poison-tolerant; the guard is scoped to this block so no lock is held across an await.
+            let _g = self.lock.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some(dir) = self.tape.parent() {
+                if !dir.as_os_str().is_empty() {
+                    std::fs::create_dir_all(dir).map_err(|e| KeelError::Other(format!("tape dir: {e}")))?;
+                }
+            }
+            let mut f = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.tape)
+                .map_err(|e| KeelError::Other(format!("tape open: {e}")))?;
+            writeln!(f, "{line}").map_err(|e| KeelError::Other(format!("tape write: {e}")))?;
+        }
+        // Ring-4: embed the turn's summary into the vector sidecar (best-effort — recall is non-critical,
+        // so an embed failure never fails the turn; the lossless Tape already holds the record).
+        if let Some(embedder) = &self.embedder {
+            let summary = Self::summarize(trace);
+            if let Ok(vec) = embedder.embed_text(&summary).await {
+                self.append_vec(&summary, &vec);
             }
         }
-        let mut f = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&self.tape)
-            .map_err(|e| KeelError::Other(format!("tape open: {e}")))?;
-        writeln!(f, "{line}").map_err(|e| KeelError::Other(format!("tape write: {e}")))?;
         Ok(())
     }
 
@@ -354,5 +463,62 @@ mod tests {
         let a = narrative_path_for(Path::new("/x/tape.jsonl"));
         assert_eq!(a.file_name().unwrap().to_str().unwrap(), "tape.narrative.md", "stem-keyed sibling");
         assert_ne!(a, narrative_path_for(Path::new("/x/other.jsonl")), "distinct tapes -> distinct narratives");
+    }
+
+    // ── A3 Ring-4: semantic recall wired into assemble (stub embedder; model-free) ──
+
+    struct StubEmbed;
+    #[async_trait]
+    impl Embed for StubEmbed {
+        async fn embed_text(&self, text: &str) -> Result<Vec<f32>> {
+            // a toy 3-d embedding keyed on a topic word → deterministic recall in tests.
+            let t = text.to_lowercase();
+            let v = if t.contains("france") || t.contains("paris") {
+                vec![1.0, 0.0, 0.0]
+            } else if t.contains("2+2") || t.contains("math") {
+                vec![0.0, 1.0, 0.0]
+            } else {
+                vec![0.0, 0.0, 1.0]
+            };
+            Ok(v)
+        }
+    }
+
+    fn clean_ring4(tape: &Path) {
+        let _ = std::fs::remove_file(tape);
+        let _ = std::fs::remove_file(narrative_path_for(tape));
+        let _ = std::fs::remove_file(vec_path_for(tape));
+        let _ = std::fs::remove_file(vec_path_for(tape).with_extension("fp"));
+    }
+
+    #[tokio::test]
+    async fn ring4_recall_injects_the_semantically_relevant_turn() {
+        let tape = temp_tape("ring4");
+        clean_ring4(&tape);
+        // working_turns = 0 isolates Ring-4 (no Ring-2); k = 1.
+        let mem = FileMemory::new("", &tape, 0).with_embedder(Arc::new(StubEmbed), Fingerprint::new("stub", 3), 1);
+        mem.record(&trace("tell me about France", "Paris is the capital")).await.unwrap();
+        mem.record(&trace("what is 2+2", "4")).await.unwrap();
+
+        let mut q = base_step();
+        q.content = vec![Content::Text { text: "a France question".into() }];
+        let a = mem.assemble(&q, &Context::default()).await.unwrap();
+        assert!(a.system.contains("Relevant earlier"), "Ring-4 header present");
+        assert!(a.system.contains("Paris is the capital"), "the France turn is recalled (most similar)");
+        assert!(!a.system.contains("2+2"), "the less-similar math turn is not recalled (k=1)");
+        clean_ring4(&tape);
+    }
+
+    #[tokio::test]
+    async fn fingerprint_mismatch_clears_the_stale_sidecar() {
+        let tape = temp_tape("ring4-fp");
+        clean_ring4(&tape);
+        let m1 = FileMemory::new("", &tape, 0).with_embedder(Arc::new(StubEmbed), Fingerprint::new("embA", 3), 1);
+        m1.record(&trace("France", "Paris")).await.unwrap();
+        assert!(vec_path_for(&tape).exists(), "sidecar written");
+        // re-open with a DIFFERENT embedder fingerprint → the stale sidecar is cleared (never serve stale).
+        let _m2 = FileMemory::new("", &tape, 0).with_embedder(Arc::new(StubEmbed), Fingerprint::new("embB", 3), 1);
+        assert!(!vec_path_for(&tape).exists(), "mismatched fingerprint clears the stale sidecar (GOLDEN_RECALL)");
+        clean_ring4(&tape);
     }
 }
