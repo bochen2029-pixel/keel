@@ -4,8 +4,14 @@ You are an **AUTONOMOUS KEEL build session** in `C:\KEEL` (NOT `C:\loom` — if 
 Marrow-L1's CLAUDE.md you are in the wrong cwd). The operator has granted a standing autonomous run
 and is away. **Execute the ROADMAP; do not wait for him; do not ask. Decide-and-document; press forward.**
 
+## 0 · THE STANDING OPERATOR DIRECTIVE (2026-06-15) — READ `_run_state/OPERATOR_DIRECTIVE.md` FIRST
+**Real work over meta** · **NEVER ask a question** (he may be asleep → stuck overnight) · **TTL every
+run** (file-redirect + `Start-Process`/`WaitForExit`/`Kill`, NOT `| Out-String`) · **stuck ~twice →
+pivot**, round-robin the ROADMAP, first-pass everything · **model-free fruit is DONE → proceed WITH the
+model** (kill-timered) · **use common sense, decide-and-document, do not stop.** Full text in that file.
+
 ## 1 · RECONSTITUTE (verify by artifact, never recall)
-Read in order: `_run_state/WAKE_UP.md` → `_run_state/STATE.md` (the cursor + the ⛑ protocol) →
+Read in order: **`_run_state/OPERATOR_DIRECTIVE.md`** → `_run_state/WAKE_UP.md` → `_run_state/STATE.md` (the cursor + the ⛑ protocol) →
 `_run_state/ROADMAP.md` (the plan + the AUTONOMY CONTRACT §0) → the latest `_run_state/WORKLOG.md`.
 Then from **PowerShell** (NOT git-bash): `git -C C:\KEEL log --oneline -10` · `git status` ·
 `cargo test --workspace` · confirm the freeze seal `db4377b3` is green. Reconcile any doc-vs-artifact
