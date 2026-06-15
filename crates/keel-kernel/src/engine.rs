@@ -22,10 +22,16 @@
 //!
 //! **Per-tier chains (I3, canon §8 footnote):** the privacy mask differs by destination, so the
 //! engine holds one egress-correct [`Chain`] per tier and runs the routed tier through *its* chain.
+//!
+//! **The driver select-loop (canon §8 `select(drivers).poll()`):** above the single turn sits the
+//! multi-turn loop — [`select`] polls the drivers in priority order, [`Engine::tick`] runs the one
+//! emitted Step, and [`Engine::run_until_idle`] repeats until every driver is idle. This is what turns
+//! KEEL from "responds to a user turn" into a self that *acts*. The continuously-running daemon (idle
+//! = sleep, run forever) is a thin L5 wrapper, deliberately not started here — this is the loop logic.
 
 use crate::Chain;
 use keel_contracts::{
-    Assertion, Content, Context, Decision, Effort, GenerateRequest, GenerateResult, GoldenCase, KeelError,
+    Assertion, Content, Context, Decision, Driver, Effort, GenerateRequest, GenerateResult, GoldenCase, KeelError,
     Memory, Message, ModelTier, Oracle, Result, Role, Router, Spine, Step, StepOutput, Trace, TraceSink,
     Verdict, VerifiedTrace,
 };
@@ -262,6 +268,42 @@ impl Engine {
         slot.chain.run(req, ctx, slot.tier.clone()).await
     }
 
+    /// One driver tick (canon §8): [`select`] a Step from the drivers (priority order), then run it
+    /// through the full loop. `Ok(None)` => every driver was idle (nothing ran). The request is built
+    /// from the Step via [`request_from_step`]; `step`/`ctx` are mutated as in [`run`](Engine::run).
+    pub async fn tick(&self, drivers: &[Arc<dyn Driver>], ctx: &mut Context) -> Result<Option<Outcome>> {
+        let Some(mut step) = select(drivers, ctx).await? else {
+            return Ok(None); // every driver idle
+        };
+        let req = request_from_step(&step);
+        Ok(Some(self.run(&mut step, ctx, req).await?))
+    }
+
+    /// The **bounded** driver loop (the testable form of the §8 daemon): [`tick`](Engine::tick) up to
+    /// `max_ticks` times, stopping early the first time every driver is idle. Each turn gets a distinct
+    /// `trace_id` (`{base}-{n}`) so it checkpoints as its own run (N rows for `metrics`) and appends its
+    /// own Tape entry, while cost accumulates across the run in the shared `ctx` (I4). Returns each
+    /// turn's [`Outcome`]. This is **not** the continuously-running daemon — that wrapper (idle = sleep,
+    /// run forever) is a thin L5 add and is deliberately not started here; this is the loop logic, and
+    /// it always terminates.
+    pub async fn run_until_idle(
+        &self,
+        drivers: &[Arc<dyn Driver>],
+        ctx: &mut Context,
+        max_ticks: usize,
+    ) -> Result<Vec<Outcome>> {
+        let base = ctx.trace_id.clone();
+        let mut outcomes = Vec::new();
+        for n in 0..max_ticks {
+            ctx.trace_id = format!("{base}-{n}"); // distinct run per turn: N metrics rows + N Tape entries
+            match self.tick(drivers, ctx).await? {
+                Some(o) => outcomes.push(o),
+                None => break, // all drivers idle; a live daemon would sleep here instead of returning
+            }
+        }
+        Ok(outcomes)
+    }
+
     /// Walk DOWN the ladder from `want` to the nearest wired tier. Local (idx 0) is always present,
     /// so this terminates; off-ladder names fall back to the manifest default, else any wired tier.
     fn resolve_down(&self, want: &str) -> String {
@@ -282,12 +324,51 @@ impl Engine {
     }
 }
 
+/// Poll the drivers in **priority order** (array order = priority: user-turn before heartbeat before
+/// watch) and return the first `Some(Step)` — the §8 `select(drivers).poll()`. `None` = every driver
+/// is idle (nothing to do now). A driver error short-circuits (the caller decides whether to continue).
+pub async fn select(drivers: &[Arc<dyn Driver>], ctx: &Context) -> Result<Option<Step>> {
+    for d in drivers {
+        if let Some(step) = d.poll(ctx).await? {
+            return Ok(Some(step));
+        }
+    }
+    Ok(None)
+}
+
+/// Build the base [`GenerateRequest`] for a driver-emitted [`Step`]: its `content` becomes the user
+/// turn (empty content => no user message — the Ring-0 system preamble still applies via `assemble`).
+/// The engine fills `model` from the routed tier; effort/grammar default. A cell needing a richer
+/// mapping composes its own loop — this is the genome default.
+pub fn request_from_step(step: &Step) -> GenerateRequest {
+    let messages = if step.content.is_empty() {
+        Vec::new()
+    } else {
+        vec![Message {
+            role: Role::User,
+            content: step.content.clone(),
+            name: None,
+            reasoning_content: None,
+            tool_call_id: None,
+        }]
+    };
+    GenerateRequest {
+        messages,
+        model: String::new(),
+        tools: Vec::new(),
+        grammar: None,
+        effort: Effort::default(),
+        cache_prefix_len: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use async_trait::async_trait;
     use keel_contracts::{AssembledContext, Capabilities, DataClass, Kind, RunId, State, Trust};
     use serde_json::json;
+    use std::collections::VecDeque;
     use std::sync::Mutex;
 
     // ── stub tiers / joints — all model-free; the engine *wiring* is what's under test ──
@@ -795,5 +876,122 @@ mod tests {
         for f in &engine.run(&mut s2, &mut ctx(), req()).await.unwrap().verdict.failures {
             assert!(f.is_ascii(), "alarm must be ASCII: {f:?}");
         }
+    }
+
+    // ── the driver select-loop (canon §8: select(drivers).poll()) ──
+
+    struct QueueDriver {
+        q: Mutex<VecDeque<Step>>,
+    }
+    impl QueueDriver {
+        fn with(steps: Vec<Step>) -> Self {
+            Self { q: Mutex::new(steps.into_iter().collect()) }
+        }
+    }
+    #[async_trait]
+    impl Driver for QueueDriver {
+        async fn poll(&self, _ctx: &Context) -> Result<Option<Step>> {
+            Ok(self.q.lock().unwrap().pop_front())
+        }
+    }
+    /// Always idle — nothing to do.
+    struct IdleDriver;
+    #[async_trait]
+    impl Driver for IdleDriver {
+        async fn poll(&self, _ctx: &Context) -> Result<Option<Step>> {
+            Ok(None)
+        }
+    }
+    /// Never idle (like a zero-interval heartbeat) — proves the `max_ticks` bound terminates the loop.
+    struct AlwaysDriver;
+    #[async_trait]
+    impl Driver for AlwaysDriver {
+        async fn poll(&self, _ctx: &Context) -> Result<Option<Step>> {
+            Ok(Some(step()))
+        }
+    }
+
+    #[tokio::test]
+    async fn select_polls_in_priority_order() {
+        // an idle higher-priority driver is skipped; the first driver with work wins.
+        let mut s = step();
+        s.ty = "work".into();
+        let drivers: Vec<Arc<dyn Driver>> = vec![Arc::new(IdleDriver), Arc::new(QueueDriver::with(vec![s]))];
+        let picked = select(&drivers, &ctx()).await.unwrap().expect("a driver had work");
+        assert_eq!(picked.ty, "work");
+    }
+
+    #[tokio::test]
+    async fn select_all_idle_is_none() {
+        let drivers: Vec<Arc<dyn Driver>> = vec![Arc::new(IdleDriver), Arc::new(IdleDriver)];
+        assert!(select(&drivers, &ctx()).await.unwrap().is_none(), "every driver idle -> nothing to do");
+    }
+
+    #[test]
+    fn request_from_step_maps_content_to_a_user_turn() {
+        let mut s = step();
+        s.content = vec![Content::Text { text: "hi".into() }];
+        let req = request_from_step(&s);
+        assert_eq!(req.messages.len(), 1);
+        assert!(matches!(req.messages[0].role, Role::User));
+        // empty content -> no user message (the Ring-0 preamble still applies via assemble).
+        assert!(request_from_step(&step()).messages.is_empty());
+    }
+
+    #[tokio::test]
+    async fn tick_runs_one_turn_then_idle() {
+        let engine = engine_with(
+            one_local(echo(0.0)),
+            Box::new(FixedRouter("local")),
+            Arc::new(EvidenceOracle),
+            Arc::new(RecSpine::default()),
+            None,
+            None,
+        );
+        let drivers: Vec<Arc<dyn Driver>> = vec![Arc::new(QueueDriver::with(vec![step()]))];
+        let mut c = ctx();
+        assert!(engine.tick(&drivers, &mut c).await.unwrap().is_some(), "one queued turn ran");
+        assert!(engine.tick(&drivers, &mut c).await.unwrap().is_none(), "queue drained -> idle");
+    }
+
+    #[tokio::test]
+    async fn run_until_idle_drains_distinct_runs_and_accumulates_cost() {
+        let spine = Arc::new(RecSpine::default());
+        let engine = engine_with(
+            one_local(echo(0.1)),
+            Box::new(FixedRouter("local")),
+            Arc::new(EvidenceOracle),
+            spine.clone(),
+            None,
+            None,
+        );
+        let drivers: Vec<Arc<dyn Driver>> = vec![Arc::new(QueueDriver::with(vec![step(), step()]))];
+        let mut c = ctx(); // trace_id "t1"
+        let outs = engine.run_until_idle(&drivers, &mut c, 10).await.unwrap();
+        assert_eq!(outs.len(), 2, "drained both queued turns, then stopped at idle");
+        // each turn checkpoints under its OWN run_id -> metrics sees N rows, not an upsert of 1.
+        let cps = spine.checkpoints.lock().unwrap();
+        assert_eq!(cps.len(), 2);
+        assert_eq!(cps[0].0, "t1-0");
+        assert_eq!(cps[1].0, "t1-1");
+        // cost accumulates across ticks in the shared ctx (I4).
+        assert!((c.cost.total - 0.2).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn run_until_idle_respects_max_ticks() {
+        // a never-idle driver (heartbeat-like) is bounded by max_ticks -> the loop always terminates.
+        let engine = engine_with(
+            one_local(echo(0.0)),
+            Box::new(FixedRouter("local")),
+            Arc::new(EvidenceOracle),
+            Arc::new(RecSpine::default()),
+            None,
+            None,
+        );
+        let drivers: Vec<Arc<dyn Driver>> = vec![Arc::new(AlwaysDriver)];
+        let mut c = ctx();
+        let outs = engine.run_until_idle(&drivers, &mut c, 3).await.unwrap();
+        assert_eq!(outs.len(), 3, "bounded by max_ticks (no infinite loop)");
     }
 }
