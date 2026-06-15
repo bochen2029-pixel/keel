@@ -16,7 +16,7 @@
 //! **I5 teeth (canon §8/§10):** the loop resolves `step.golden_refs` against the injected registry
 //! and verifies against the resolved cases. Two guards keep "vacuous on a plain chat turn" *safe*:
 //! (a) an **unresolved** `golden_ref` → **fail-closed** (a named-but-missing assertion is a hole,
-//! never a vacuous pass); (b) a **`critical`** step with **no correctness assertion** (the I3 baseline excluded; empty verdict
+//! never a vacuous pass); (b) a **`critical`** step with **no correctness assertion** (the baseline oracle excluded; empty verdict
 //! evidence) → **config fault**, never a silent pass. A non-critical, no-ref turn still passes
 //! silently — the teeth bite on critical/ref'd work, not on plain chat.
 //!
@@ -59,11 +59,10 @@ pub struct EngineConfig {
     pub slots: BTreeMap<String, TierSlot>,
     pub router: Box<dyn Router>,
     pub oracle: Arc<dyn Oracle>,
-    /// The **I3 sovereignty baseline** (currently no-SSN-on-output): an always-on check that runs and
-    /// folds into the verdict but is **excluded from the critical-step guard (#3)** — a privacy
-    /// baseline is not a correctness oracle. **STOPGAP:** `mw::privacy` masks only on *egress* (cloud),
-    /// so a LOCAL turn's output PII is otherwise unguarded; this covers that gap until the Stage-2
-    /// privacy rung re-homes it as an output-side I3 check (then this slot is dropped). Never satisfies #3.
+    /// An optional **always-on extra oracle** (e.g. a cell's safety/sovereignty check): it runs every
+    /// turn and folds into the verdict but is **excluded from the critical-step guard (#3)** — a baseline
+    /// is not a correctness oracle. The genome wires `None` (the old no-SSN stopgap was re-homed to the
+    /// `mw::privacy` output rung, A4). A cell may inject one; it never satisfies #3.
     pub baseline: Option<Arc<dyn Oracle>>,
     pub spine: Arc<dyn Spine>,
     pub memory: Option<Arc<dyn Memory>>,
@@ -190,8 +189,8 @@ impl Engine {
         // capture BEFORE folding the baseline: only a CORRECTNESS assertion counts for #3.
         let correctness_asserted = !verdict.evidence.is_empty();
 
-        // (6a) the I3 sovereignty baseline (no-SSN-on-output) runs always and folds into the verdict —
-        //      but it is a privacy check, NOT a correctness oracle, so it is **excluded** from #3.
+        // (6a) the optional always-on baseline oracle (a cell's safety/sovereignty check) runs and folds
+        //      into the verdict — but it is NOT a correctness oracle, so it is **excluded** from #3.
         if let Some(baseline) = &self.baseline {
             let bv = baseline.verify(&output, &[], ctx).await?;
             verdict.passed &= bv.passed;
@@ -211,7 +210,7 @@ impl Engine {
         }
 
         // (6c) a CRITICAL step needs a CORRECTNESS assertion — a resolved golden_ref that fired, or a
-        //      domain oracle — **not** the I3 baseline. None ⇒ config fault, never a vacuous pass
+        //      domain oracle — **not** the baseline oracle. None ⇒ config fault, never a vacuous pass
         //      (canon 8/10). Resolving a ref is not asserting one: a ref to a conformance-only golden
         //      produces no correctness evidence and lands here too.
         if step.critical && !correctness_asserted {
@@ -812,7 +811,7 @@ mod tests {
 
     #[tokio::test]
     async fn baseline_does_not_satisfy_critical_step() {
-        // the un-neutering: a critical step with NO golden_ref, where ONLY the I3 baseline asserts,
+        // the un-neutering: a critical step with NO golden_ref, where ONLY the baseline oracle asserts,
         // must still config-fault — a privacy baseline is not a correctness oracle.
         let engine = Engine::new(EngineConfig {
             slots: one_local(echo(0.0)),

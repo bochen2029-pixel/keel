@@ -22,7 +22,7 @@ use keel_contracts::{
 use keel_kernel::engine::{Engine as KernelEngine, EngineConfig, TierSlot};
 use keel_kernel::{Chain, Manifest, Registry, TierCfg};
 use keel_middleware::{AuditMiddleware, AuditSink, CostMiddleware, FileAuditSink, PrivacyMiddleware, Redactor};
-use keel_services::{DifficultyRouter, FileMemory, FileTraceSink, GoldenDispatchOracle, PropertyOracle, Verifier};
+use keel_services::{DifficultyRouter, FileMemory, FileTraceSink, GoldenDispatchOracle, Verifier};
 use keel_store::SqliteStore;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -97,12 +97,10 @@ impl Engine {
         let mut correctness = Verifier::new();
         correctness.register(Box::new(GoldenDispatchOracle));
         let oracle: Arc<dyn Oracle> = Arc::new(correctness);
-        // I3 sovereignty BASELINE (no-SSN-on-output): always-on, folded into the verdict, but it NEVER
-        // counts for #3 (a privacy baseline is not a correctness oracle). STOPGAP until mw::privacy
-        // gains an output-side rung (Stage 2) — see EngineConfig.baseline.
-        let mut baseline_v = Verifier::new();
-        baseline_v.register(Box::new(PropertyOracle::new(vec!["no_ssn_pattern".into()])));
-        let baseline: Option<Arc<dyn Oracle>> = Some(Arc::new(baseline_v));
+        // A4: the no-SSN output STOPGAP is retired — `mw::privacy` now masks output PII as a proper I3
+        // rung on every tier. The engine's optional `baseline` slot remains a generic always-on
+        // extra-oracle seam (excluded from the critical-step #3), but the genome wires none.
+        let baseline: Option<Arc<dyn Oracle>> = None;
         // I2: the SQLite index is the first Spine. The append-only file ledger stays the system of
         // record; this index is derived and rebuildable from it. (.keelstate is created by the sink.)
         let spine: Arc<dyn Spine> =

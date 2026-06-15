@@ -91,11 +91,11 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   ok:true, checkpointed+Taped+audited (`keel metrics` saw the turns). **No new dep.** +4 tests.
   *(NB: capturing the daemon's output in the same shell can hang on Windows cold-start — a shell/handle
   artifact, NOT a daemon defect; the daemon exits fine. → ISSUE-8; verify-by-artifact instead.)*
-- `[G] A4` · **re-home the no-SSN baseline → an I3 output rung** (`mw::privacy` output-side check) so
-  the engine's `EngineConfig.baseline` STOPGAP retires. **Done =** output PII handled by an I3 rung,
-  not the I5 baseline; the baseline slot is dropped. **No new dep.** **DEFERRED by operator 2026-06-15
-  → ISSUE-9** (a real privacy-policy fork in his flagged forward-design area: mask-all-output vs
-  egress-only-mask; sharper now that A6.1's Tape persists outputs). Build only after the policy is set.
+- `[x] A4` · **no-SSN baseline → I3 output rung** — DONE 2026-06-15. `mw::privacy` gains an OUTPUT rung:
+  scrubs PII from the response on EVERY tier (audited I1), so the model's own PII never lands in the
+  persistent Tape/ledger/egress/display. The no-SSN I5 stopgap is retired (engine `baseline` wired
+  `None`; the slot stays a generic always-on extra-oracle seam, excluded from #3). **Decided
+  mask-all-output** (genome state-hygiene default; a cell can swap a no-op redactor). +1 test; 123/5 green.
 - `[G] A3` · **embedder + `GOLDEN_RECALL`** — **format-committing (ADR #13) → ISSUE-1 operator
   design-review FIRST.** Proposed shape: embed adapter = HTTP to llama-server `/v1/embeddings`
   (Qwen3-Embedding-0.6B, model at `C:\models`) reusing the `openai` mapping; `sqlite-vec` vector index
@@ -217,7 +217,8 @@ just post-DONE, to catch drift early.)*
   of the persistent Tape/ledger/egress, but masks a local sovereign answer's own PII) **or egress-only +
   audit-local** (sovereign local answers intact; PII can sit in the local Tape)? The middleware can't
   see a turn's `sovereign` class (it only sees request/response), so one default must be chosen. A6.1
-  made this sharper (the Tape now persists outputs). Asked + **deferred 2026-06-15**; build A4 once set.
+  made this sharper (the Tape now persists outputs). **RESOLVED 2026-06-15:** per the operator's "decide
+with common sense, never ask" directive, chose **mask-all-output** (state-hygiene default) and built A4.
 - *(Append new issues as discovered, each: `ISSUE-N [type] — description · what unblocks it`. If the
   loop STALLS — only `[G]`/`[!]`/`[?]` slices remain and none can advance — write `.keelstate/STALLED`
   with the reason so the supervisor stops respawning, and the operator resolves the queue on next look.)*

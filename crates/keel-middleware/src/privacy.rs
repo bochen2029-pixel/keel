@@ -126,9 +126,11 @@ fn luhn_ok(s: &str) -> bool {
     sum.is_multiple_of(10)
 }
 
-/// I3 mask middleware. On an **egress** call (a non-local tier) it scrubs the request's text
-/// before it leaves the box; on a local call it passes through (local is sovereign-safe). The
-/// engine constructs it with `egress = true` only when the terminal tier leaves the box.
+/// I3 mask middleware. Two rungs: the **request** rung scrubs outbound text on an **egress** call (a
+/// non-local tier) and passes through locally (the input is sovereign-safe on the box); the **output**
+/// rung scrubs the response on **every** tier, so the model's own PII never lands in KEEL's persistent
+/// state (Tape/ledger), egress, or display. Both are audited (I1). The engine sets `egress = true` only
+/// when the terminal tier leaves the box.
 pub struct PrivacyMiddleware {
     redactor: Arc<Redactor>,
     egress: bool,
@@ -168,7 +170,33 @@ impl Middleware for PrivacyMiddleware {
                 }
             }
         }
-        next.run(req, ctx).await
+        let mut result = next.run(req, ctx).await?;
+
+        // I3 OUTPUT rung (canon §5.1): scrub PII from the response on EVERY tier — so the model's own
+        // output never lands in KEEL's persistent state (the Tape/ledger), egress, or display. This is
+        // the proper home of what was an I5 no-SSN "baseline" stopgap in the engine. Always-on
+        // (state-hygiene; a cell that needs a sovereign-local answer intact can swap a no-op redactor).
+        let mut out_labels: Vec<String> = Vec::new();
+        let (scrubbed, findings) = self.redactor.redact(&result.content);
+        if !findings.is_empty() {
+            result.content = scrubbed;
+            for f in &findings {
+                out_labels.push(format!("rung{}:{}", f.rung, f.kind));
+            }
+        }
+        if let Some(rc) = result.reasoning_content.take() {
+            let (s, rf) = self.redactor.redact(&rc);
+            for f in &rf {
+                out_labels.push(format!("rung{}:{}", f.rung, f.kind));
+            }
+            result.reasoning_content = Some(s);
+        }
+        if !out_labels.is_empty() {
+            if let Some(sink) = &self.audit_sink {
+                sink.emit(&AuditEvent::redaction(ctx.trace_id.clone(), result.model.clone(), out_labels));
+            }
+        }
+        Ok(result)
     }
 }
 
@@ -335,9 +363,39 @@ mod tests {
 
     #[tokio::test]
     async fn local_call_audits_no_redaction() {
-        // non-egress (local, sovereign-safe): no mask, hence no redaction event.
+        // non-egress + empty output (CaptureTier): no request mask, nothing to scrub on output → no event.
         let sink = Arc::new(VecAuditSink::default());
         run_with_sink(false, sink.clone()).await;
         assert!(sink.events.lock().unwrap().is_empty());
+    }
+
+    // ── the I3 OUTPUT rung (canon §5.1): scrub the model's response on every tier ──
+
+    struct PiiTier;
+    #[async_trait]
+    impl ModelTier for PiiTier {
+        fn caps(&self) -> Capabilities {
+            Capabilities::default()
+        }
+        async fn generate(&self, _req: GenerateRequest, _ctx: &Context) -> Result<GenerateResult> {
+            Ok(GenerateResult { content: "your key is sk-deadbeef99 ok".into(), model: "m".into(), ..Default::default() })
+        }
+    }
+
+    #[tokio::test]
+    async fn output_pii_is_masked_on_every_tier() {
+        // a tier that emits a secret in its response — masked + audited on BOTH local and egress.
+        for egress in [false, true] {
+            let sink = Arc::new(VecAuditSink::default());
+            let mw = PrivacyMiddleware::new(Arc::new(Redactor::new(vec![])), egress, Some(sink.clone()));
+            let chain = Chain::new(vec![Arc::new(mw)]);
+            let res = chain.run(req_with("hi"), &Context::default(), Arc::new(PiiTier)).await.unwrap();
+            assert!(!res.content.contains("sk-deadbeef99"), "output secret masked (egress={egress})");
+            assert!(res.content.contains("[REDACTED]"));
+            assert!(
+                sink.events.lock().unwrap().iter().any(|e| e.code == "REDACTION" && e.redactions.iter().any(|r| r.contains("api_key"))),
+                "output redaction is I1-audited (egress={egress})"
+            );
+        }
     }
 }
