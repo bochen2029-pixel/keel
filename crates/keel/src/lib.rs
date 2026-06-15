@@ -40,10 +40,8 @@ pub const TAPE_PATH: &str = ".keelstate/tape/tape.jsonl";
 /// Operator-frozen ground truth the engine resolves `step.golden_refs` against (read-only). KEEL's
 /// own conformance set; a cell points the registry at its own goldens instead.
 pub const GOLDEN_PATH: &str = "tests/golden/golden.json";
-// local substrate launch (paths match keel.lock; keel.lock-driven config is a refinement)
-pub const LLAMA_EXE: &str = r"C:\llama.cpp\llama-server.exe";
-pub const LLAMA_MODEL: &str = r"C:\models\Qwen3.5-9B-Q5_K_M.gguf";
-pub const LLAMA_MMPROJ: &str = r"C:\models\mmproj-F16.gguf";
+// llama-server launch paths are keel.lock-driven (servers.llama_cpp + substrate.llm_vision, via the
+// Manifest helpers); only the KEEL-owned log path stays a const here.
 pub const LLAMA_LOG: &str = ".keelstate/llama-server.log";
 
 // ── the self-driving engine (L5 injection → L1 loop) ──────────────────────────
@@ -76,7 +74,7 @@ impl Engine {
                 eprintln!("[keel] tier '{name}' unavailable ({env} unset) — skipped");
                 continue;
             }
-            let tier = match build_tier(name, tcfg) {
+            let tier = match build_tier(name, tcfg, manifest) {
                 Ok(t) => t,
                 Err(e) => {
                     eprintln!("[keel] tier '{name}' could not be wired ({e}) — skipped");
@@ -168,7 +166,7 @@ pub fn assemble(manifest: &Manifest, tier_override: Option<&str>) -> Result<Asse
         .tier(&tier_name)
         .ok_or_else(|| KeelError::Other(format!("no tier '{tier_name}' in manifest")))?;
 
-    let tier = build_tier(&tier_name, tcfg)?;
+    let tier = build_tier(&tier_name, tcfg, manifest)?;
     let mut registry = Registry::new();
     registry.register(tier_name.clone(), tier.clone());
 
@@ -185,13 +183,13 @@ pub fn assemble(manifest: &Manifest, tier_override: Option<&str>) -> Result<Asse
 
 /// Construct the brain adapter for a tier from its config, dispatching on `adapter`. Local resolves
 /// (probe) or cold-starts llama-server; cloud tiers read their key from the env (never inlined).
-fn build_tier(tier_name: &str, tcfg: &TierCfg) -> Result<Arc<dyn ModelTier>> {
+fn build_tier(tier_name: &str, tcfg: &TierCfg, manifest: &Manifest) -> Result<Arc<dyn ModelTier>> {
     let tier: Arc<dyn ModelTier> = match tcfg.adapter.as_str() {
         "local_llama" => {
-            let endpoint = resolve_local_endpoint(tcfg)?;
+            let endpoint = resolve_local_endpoint(tcfg, manifest)?;
             Arc::new(
                 LocalLlama::new(endpoint, tcfg.model.clone(), tier_name.to_string(), tcfg.price.to_price(), tcfg.vision)
-                    .with_max_tokens(2048),
+                    .with_max_tokens(tcfg.max_tokens),
             )
         }
         "deepseek" => {
@@ -199,7 +197,7 @@ fn build_tier(tier_name: &str, tcfg: &TierCfg) -> Result<Arc<dyn ModelTier>> {
             let endpoint = tcfg.endpoint.clone().unwrap_or_else(|| DEEPSEEK_ENDPOINT.to_string());
             Arc::new(
                 DeepSeek::new(endpoint, tcfg.model.clone(), tier_name.to_string(), tcfg.price.to_price(), key)
-                    .with_max_tokens(2048),
+                    .with_max_tokens(tcfg.max_tokens),
             )
         }
         "anthropic" => {
@@ -207,7 +205,7 @@ fn build_tier(tier_name: &str, tcfg: &TierCfg) -> Result<Arc<dyn ModelTier>> {
             let endpoint = tcfg.endpoint.clone().unwrap_or_else(|| ANTHROPIC_ENDPOINT.to_string());
             Arc::new(
                 Anthropic::new(endpoint, tcfg.model.clone(), tier_name.to_string(), tcfg.price.to_price(), key)
-                    .with_max_tokens(2048),
+                    .with_max_tokens(tcfg.max_tokens),
             )
         }
         other => return Err(KeelError::Other(format!("unknown adapter '{other}' for tier '{tier_name}'"))),
@@ -234,7 +232,7 @@ fn build_chain(sink: Arc<dyn AuditSink>, redactor: Arc<Redactor>, hard_stop: f64
 }
 
 /// Resolve the local endpoint: explicit override → probe a running server (c1) → cold-start one (c2).
-fn resolve_local_endpoint(tcfg: &TierCfg) -> Result<String> {
+fn resolve_local_endpoint(tcfg: &TierCfg, manifest: &Manifest) -> Result<String> {
     if let Some(e) = tcfg.endpoint.clone() {
         return Ok(e);
     }
@@ -244,9 +242,17 @@ fn resolve_local_endpoint(tcfg: &TierCfg) -> Result<String> {
             Ok(e)
         }
         Err(_) => {
+            // cold-start needs the launch paths — keel.lock-driven (servers.llama_cpp + substrate.llm_vision).
+            // Missing config => fail honestly (SUBSTRATE_UNRESOLVED), never launch a guessed binary.
+            let exe = manifest.llama_exe().ok_or_else(|| {
+                KeelError::SubstrateUnresolved("keel.lock servers.llama_cpp {path, exe} required to cold-start llama-server".into())
+            })?;
+            let model = manifest.llm_model_path().ok_or_else(|| {
+                KeelError::SubstrateUnresolved("keel.lock servers.models_dir + substrate.llm_vision.file required to cold-start".into())
+            })?;
             eprintln!("[keel] no server up — cold-starting llama-server (first call loads the model)…");
-            let mut cfg = keel_kernel::LlamaServerConfig::new(LLAMA_EXE, LLAMA_MODEL);
-            cfg.mmproj = Some(LLAMA_MMPROJ.to_string());
+            let mut cfg = keel_kernel::LlamaServerConfig::new(exe, model);
+            cfg.mmproj = manifest.llm_mmproj_path();
             cfg.log_path = Some(LLAMA_LOG.to_string());
             let server = keel_kernel::launch(&cfg)?;
             let ep = server.endpoint().to_string();

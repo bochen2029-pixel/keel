@@ -10,7 +10,9 @@ keel:        { version: 0.2.0, stage: stage0 }   # spec -> stage0 -> stage1 -> s
 substrate:
   llm_vision:                                   # brain + eyes (native multimodal, early-fusion)
     id: qwen3.5-9b-q5_k_m
+    file: Qwen3.5-9B-Q5_K_M.gguf                 # on-disk model filename under models_dir (id is normalized, not the path)
     mmproj: mmproj-F16                           # llama.cpp serves Qwen vision via this projector file
+    mmproj_file: mmproj-F16.gguf                 # on-disk projector filename under models_dir
     sha256: TODO
     mmproj_sha256: TODO
     disposition: shared
@@ -51,7 +53,7 @@ substrate:
 
 # --- inference servers (resolver targets) -----------------------------------
 servers:
-  llama_cpp: { path: "C:\\llama.cpp", build: b9627, cuda: "12.4", endpoint: "http://127.0.0.1:8080", launch: managed, prev_build: "C:\\llama.cpp-b8931-april" }
+  llama_cpp: { path: "C:\\llama.cpp", exe: llama-server.exe, build: b9627, cuda: "12.4", endpoint: "http://127.0.0.1:8080", launch: managed, prev_build: "C:\\llama.cpp-b8931-april" }
   # ^ updated b8931 -> b9627 on 2026-06-13 (side-by-side; prev build reversible). Validated on Qwen3.5-9B-Q5_K_M: text + reasoning_content + thinking-toggle + vision(mmproj-F16).
   #   Qwen3.5-9B native ctx = 262144 (256K). Plan: KV q8_0 + flash-attn for context headroom (the update's purpose) — validate at managed launch. TurboQuant KV (Google, ICLR'26) NOT in upstream (PR closed 2026-06-03); watch-item, not adopted.
   whisper:   { path: "C:\\whisper.cpp", mode: "cli|server" }
@@ -68,9 +70,9 @@ resolver_order:
 # --- tiers (the routing economy) --------------------------------------------
 # price is $/1M tokens (miss / hit / out); local is electricity, tracked as $0.
 tiers:
-  local:     { adapter: local_llama, model: qwen3.5-9b-q5_k_m, vision: true, price: { miss: 0.0,   hit: 0.0,      out: 0.0  }, default_effort: { n: 8 } }
-  cheap-API: { adapter: deepseek,    model: deepseek-v4-pro,   vision: false, api_key_env: DEEPSEEK_API_KEY, price: { miss: 0.435, hit: 0.003625, out: 0.87 }, default_effort: { n: 2, thinking: high } }
-  frontier:  { adapter: anthropic,   model: claude-opus-4-8,   vision: true,  api_key_env: ANTHROPIC_API_KEY, price: { miss: 5.0,   hit: 0.5,      out: 25.0 }, default_effort: { n: 1 } }
+  local:     { adapter: local_llama, model: qwen3.5-9b-q5_k_m, vision: true, price: { miss: 0.0,   hit: 0.0,      out: 0.0  }, max_tokens: 2048, default_effort: { n: 8 } }
+  cheap-API: { adapter: deepseek,    model: deepseek-v4-pro,   vision: false, api_key_env: DEEPSEEK_API_KEY, price: { miss: 0.435, hit: 0.003625, out: 0.87 }, max_tokens: 2048, default_effort: { n: 2, thinking: high } }
+  frontier:  { adapter: anthropic,   model: claude-opus-4-8,   vision: true,  api_key_env: ANTHROPIC_API_KEY, price: { miss: 5.0,   hit: 0.5,      out: 25.0 }, max_tokens: 2048, default_effort: { n: 1 } }
 
 router:
   default_tier: local

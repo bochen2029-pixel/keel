@@ -45,6 +45,9 @@ pub struct TierCfg {
     pub endpoint: Option<String>,
     #[serde(default)]
     pub price: PriceCfg,
+    /// Max output tokens for this tier (keel.lock-driven; default 2048). The adapter caps generation.
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: u32,
     #[serde(default)]
     pub default_effort: Effort,
 }
@@ -57,6 +60,60 @@ impl TierCfg {
     pub fn capabilities(&self) -> Capabilities {
         Capabilities { vision: self.vision, video: false, thinking: self.default_effort.thinking.is_some() }
     }
+}
+
+fn default_max_tokens() -> u32 {
+    2048
+}
+
+/// Local inference servers + model dir (keel.lock `servers`) — the substrate resolver's launch
+/// targets. Only the fields the wiring needs are modeled; the rest (build/cuda/launch/…) are ignored.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct ServersCfg {
+    #[serde(default)]
+    pub llama_cpp: LlamaCppCfg,
+    /// Directory holding the model files (joined with `substrate.llm_vision.file`/`mmproj_file`).
+    #[serde(default)]
+    pub models_dir: String,
+}
+
+/// llama.cpp install + server exe (keel.lock `servers.llama_cpp`).
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct LlamaCppCfg {
+    #[serde(default)]
+    pub path: String,
+    /// Server executable name under `path` (e.g. `llama-server.exe`).
+    #[serde(default)]
+    pub exe: String,
+    /// Endpoint of an already-running server (the resolver probes it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+}
+
+/// Resolved substrate models (keel.lock `substrate`). Only `llm_vision` is modeled here; the
+/// audio/embedding/rerank/privacy organs are picked up by their own slices.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct SubstrateCfg {
+    #[serde(default)]
+    pub llm_vision: LlmVisionCfg,
+}
+
+/// The local vision model (keel.lock `substrate.llm_vision`). `id` is the logical (normalized) id;
+/// `file`/`mmproj_file` are the on-disk names under `servers.models_dir` — the resolver needs the
+/// path, not the id, to cold-start llama-server.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct LlmVisionCfg {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub file: String,
+    #[serde(default)]
+    pub mmproj_file: String,
+}
+
+/// Join a directory + filename with the OS separator (Windows `\`, Unix `/`).
+fn join_path(dir: &str, name: &str) -> String {
+    Path::new(dir).join(name).to_string_lossy().into_owned()
 }
 
 fn default_tier() -> String {
@@ -123,6 +180,10 @@ pub struct Manifest {
     pub router: RouterCfg,
     #[serde(default)]
     pub cost: CostCfg,
+    #[serde(default)]
+    pub servers: ServersCfg,
+    #[serde(default)]
+    pub substrate: SubstrateCfg,
 }
 impl Manifest {
     /// Parse from a YAML string (the `keel.lock` dialect).
@@ -145,6 +206,25 @@ impl Manifest {
     /// The default effort for a tier (its configured `Effort`, else the neutral default).
     pub fn tier_effort(&self, name: &str) -> Effort {
         self.tiers.get(name).map(|t| t.default_effort.clone()).unwrap_or_default()
+    }
+
+    /// The llama-server executable path (`servers.llama_cpp.path` + `exe`), or `None` if unconfigured
+    /// (then the resolver fails honestly rather than launching a guessed binary).
+    pub fn llama_exe(&self) -> Option<String> {
+        let s = &self.servers.llama_cpp;
+        (!s.path.is_empty() && !s.exe.is_empty()).then(|| join_path(&s.path, &s.exe))
+    }
+
+    /// The local vision model file path (`servers.models_dir` + `substrate.llm_vision.file`).
+    pub fn llm_model_path(&self) -> Option<String> {
+        let (dir, file) = (&self.servers.models_dir, &self.substrate.llm_vision.file);
+        (!dir.is_empty() && !file.is_empty()).then(|| join_path(dir, file))
+    }
+
+    /// The vision projector (mmproj) file path (`servers.models_dir` + `substrate.llm_vision.mmproj_file`).
+    pub fn llm_mmproj_path(&self) -> Option<String> {
+        let (dir, mmproj) = (&self.servers.models_dir, &self.substrate.llm_vision.mmproj_file);
+        (!dir.is_empty() && !mmproj.is_empty()).then(|| join_path(dir, mmproj))
     }
 }
 
@@ -170,6 +250,7 @@ router:
         assert_eq!(local.adapter, "local_llama");
         assert!(local.vision);
         assert_eq!(local.default_effort.n, 8);
+        assert_eq!(local.max_tokens, 2048); // default when unspecified in keel.lock
         assert_eq!(local.price.to_price().input_miss, 0.0);
         assert!(local.capabilities().vision);
 
@@ -191,6 +272,9 @@ router:
         assert_eq!(m.router.default_tier, "local");
         assert_eq!(m.cost.budget_per_task, 5.0);
         assert_eq!(m.tier_effort("nope").n, 1); // neutral default for an unknown tier
+        // absent servers/substrate -> the launch-path helpers return None (the resolver fails honestly)
+        assert!(m.llama_exe().is_none());
+        assert!(m.llm_model_path().is_none());
     }
 
     #[test]
@@ -209,5 +293,15 @@ router:
         assert_eq!(m.router.escalate_after_oracle_failures, 2);
         // the cheap-API key is referenced by env name, never inlined
         assert_eq!(m.tier("cheap-API").unwrap().api_key_env.as_deref(), Some("DEEPSEEK_API_KEY"));
+        // config-from-keel.lock: launch paths + max_tokens are keel.lock-driven (no hardcoded consts)
+        assert_eq!(m.tier("local").unwrap().max_tokens, 2048);
+        assert_eq!(m.servers.llama_cpp.exe, "llama-server.exe");
+        assert!(m.servers.models_dir.contains("models"));
+        assert_eq!(m.substrate.llm_vision.file, "Qwen3.5-9B-Q5_K_M.gguf");
+        assert_eq!(m.substrate.llm_vision.mmproj_file, "mmproj-F16.gguf");
+        // derived launch paths join the dir + the on-disk filename (id is normalized, not a path)
+        assert!(m.llama_exe().unwrap().ends_with("llama-server.exe"));
+        assert!(m.llm_model_path().unwrap().ends_with("Qwen3.5-9B-Q5_K_M.gguf"));
+        assert!(m.llm_mmproj_path().unwrap().ends_with("mmproj-F16.gguf"));
     }
 }
