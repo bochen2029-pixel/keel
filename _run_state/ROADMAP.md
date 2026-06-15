@@ -161,9 +161,10 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   — NOT a cell; it can start anytime and does not block D1/D2.)*
 
 ### Phase E — completion gates
-- `[ ] E1` · **C++-port-readiness** — confirm the goldens are a complete language-neutral conformance
-  layer (a future C/C++ port re-passes them, ADR #5). Doc + a coverage check (every joint/invariant has
-  a golden or a documented gap).
+- `[x] E1` · **C++-port-readiness** — DONE 2026-06-15. `docs/conformance-coverage.md` maps every joint +
+  invariant → its golden family or structural unit test, with the two documented gaps (`recall`
+  conformance-ahead until A3; `ToolHost` unbuilt until D3). Verdict: the 6 golden families are a complete
+  *behavioral* conformance layer; structural joints carry no golden by design (a port re-passes their unit tests).
 - `[ ] E2` · **the DONE review** — all phases done/decided, ISSUES resolved-or-accepted, the §4.2
   invariant scorecard all-green; write the completion account; flip `keel.lock` `stage:` to `stage3`/done.
 
