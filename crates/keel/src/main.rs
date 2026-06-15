@@ -96,6 +96,18 @@ async fn run() -> keel_contracts::Result<()> {
     };
 
     if let Some(t) = tier_override {
+        // I3/I5 guard (audit M1): the manual --tier override skips the router (the I3 force-local GATE)
+        // AND the engine (the I5 verifier), so flags that rely on them must NOT be silently voided —
+        // refuse rather than give a false sense of protection.
+        let is_local = manifest.tier(&t).map(|tc| tc.adapter == "local_llama").unwrap_or(false);
+        if sovereign && !is_local {
+            eprintln!("keel: --sovereign cannot be honored with --tier {t} (the manual override skips the I3 force-local gate). Drop --tier to use the router, or pin a local tier.");
+            std::process::exit(2);
+        }
+        if critical || !golden_refs.is_empty() {
+            eprintln!("keel: --critical / --golden-ref require the self-driving path (the I5 verifier); the manual --tier override skips verification. Drop --tier.");
+            std::process::exit(2);
+        }
         // ── manual override: pin one tier, skip the router (no needless local cold-start) ──
         let asm = keel::assemble(&manifest, Some(&t))?;
         let req = GenerateRequest {
@@ -226,6 +238,10 @@ async fn run_daemon() -> keel_contracts::Result<()> {
     loop {
         ctx.trace_id = format!("{base}-{attempt}");
         attempt += 1;
+        // M3 (audit): each daemon tick is its own task — re-seed the per-task budget headroom so a
+        // perpetual paid daemon never climbs one shared budget into a permanent BudgetExceeded.
+        // (cost.total stays cumulative for the final run-cost report; only the remaining headroom resets.)
+        ctx.task_budget = Some(ctx.cost.total + manifest.cost.budget_per_task);
         match engine.tick(&drivers, &mut ctx).await {
             Ok(Some(outcome)) => {
                 ran += 1;

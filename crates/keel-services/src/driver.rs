@@ -56,11 +56,11 @@ impl UserTurnDriver {
 
     /// Enqueue a user turn (L5 calls this when the operator submits input).
     pub fn push(&self, step: Step) {
-        self.pending.lock().expect("user-turn queue poisoned").push_back(step);
+        self.pending.lock().unwrap_or_else(|p| p.into_inner()).push_back(step);
     }
 
     pub fn len(&self) -> usize {
-        self.pending.lock().expect("user-turn queue poisoned").len()
+        self.pending.lock().unwrap_or_else(|p| p.into_inner()).len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -72,7 +72,7 @@ impl UserTurnDriver {
 impl Driver for UserTurnDriver {
     async fn poll(&self, _ctx: &Context) -> Result<Option<Step>> {
         // lock scope holds no await: the guard is dropped before we return (no await-holding-lock).
-        let next = self.pending.lock().expect("user-turn queue poisoned").pop_front();
+        let next = self.pending.lock().unwrap_or_else(|p| p.into_inner()).pop_front();
         Ok(next.map(|mut s| {
             s.source = Some(SRC_USER.to_string());
             s
@@ -103,7 +103,7 @@ impl HeartbeatDriver {
     /// the last fire (or this is the first poll), else `None`. Advances the last-fire instant only when
     /// it fires, so the cadence never drifts faster than `interval`.
     pub fn tick(&self, now: Instant) -> Option<Step> {
-        let mut last = self.last.lock().expect("heartbeat clock poisoned");
+        let mut last = self.last.lock().unwrap_or_else(|p| p.into_inner());
         let due = match *last {
             None => true,
             Some(prev) => now.duration_since(prev) >= self.interval,
@@ -155,7 +155,7 @@ impl Driver for WatchDriver {
         let Some(token) = (self.probe)(ctx) else {
             return Ok(None); // nothing to observe
         };
-        let mut last = self.last.lock().expect("watch state poisoned");
+        let mut last = self.last.lock().unwrap_or_else(|p| p.into_inner());
         if *last == Some(token) {
             return Ok(None); // unchanged → free
         }

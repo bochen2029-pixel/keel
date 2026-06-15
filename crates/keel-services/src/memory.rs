@@ -310,6 +310,14 @@ impl Memory for FileMemory {
     /// Append the full `Trace` to the Tape as one JSONL line — the lossless factual register (§11).
     async fn record(&self, trace: &Trace) -> Result<()> {
         use std::io::Write;
+        // M2 (audit): memory-MAINTENANCE turns (consolidate, cold-eyes — source "memory" / ty "memory:*")
+        // are model-authored and must NOT land on the lossless FACTUAL Tape: recording them would confuse
+        // the registers (a model-authored summary in the factual record — canon §22.8 / I5) and create a
+        // self-ingest loop (the next consolidation re-reads the prior one). Their output lives only in the
+        // Ring-3 narrative register (via `set_narrative`), never the Tape.
+        if trace.step.source.as_deref() == Some("memory") || trace.step.ty.starts_with("memory:") {
+            return Ok(());
+        }
         let line = serde_json::to_string(trace).map_err(|e| KeelError::Other(format!("tape encode: {e}")))?;
         {
             // poison-tolerant; the guard is scoped to this block so no lock is held across an await.
@@ -439,6 +447,23 @@ mod tests {
         let s = mem.consolidate().await.unwrap();
         assert_eq!(s.ty, "memory:consolidate");
         assert_eq!(s.source.as_deref(), Some("memory"));
+    }
+
+    #[tokio::test]
+    async fn memory_maintenance_turns_are_not_recorded_to_the_tape() {
+        // M2 (audit): a consolidate/cold-eyes turn (source "memory") must NOT land on the factual Tape
+        // (no register confusion, no self-ingest loop) — only normal turns do.
+        let tape = temp_tape("maint");
+        let mem = FileMemory::new("", &tape, 5);
+        let mut maint = trace("consolidation prompt", "MODEL-AUTHORED-NARRATIVE");
+        maint.step.source = Some("memory".into());
+        maint.step.ty = "memory:consolidate".into();
+        mem.record(&maint).await.unwrap();
+        mem.record(&trace("a real question", "a real answer")).await.unwrap();
+        let a = mem.assemble(&base_step(), &Context::default()).await.unwrap();
+        assert!(a.system.contains("a real answer"), "the normal turn is on the Tape");
+        assert!(!a.system.contains("MODEL-AUTHORED-NARRATIVE"), "the maintenance turn is NOT on the factual Tape");
+        let _ = std::fs::remove_file(&tape);
     }
 
     // ── A6.1: the Ring-3 narrative register (model-authored arc, separate from the factual Tape) ──

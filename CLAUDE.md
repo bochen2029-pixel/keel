@@ -37,11 +37,12 @@ The persistent, sovereign **self** that perceives (eyes + ears), remembers, rout
 *(Summary only — the live, authoritative per-slice anchor is `_run_state/STATE.md`. Trust STATE.md + `git`, never this block, for current state.)*
 - **Canon:** v0.2 adopted; patched with embedder/reranker + the privacy three-rung; ADR #5 = native Rust.
 - **L0 contracts:** the ten joints + types + the §18 error taxonomy — frozen, green (rustc 1.96, MSVC).
-- **Golden cases:** RATIFIED + FROZEN (`tests/golden/golden.json` + `.frozen.json`, 21 cases / 6 families) — agent read-only. The KEEL-native freeze-gate is built but `#[ignore]`-dormant pending the operator's one-time re-stamp.
+- **Golden cases:** RATIFIED + FROZEN (`tests/golden/golden.json` + `.frozen.json`, 21 cases / 6 families) — agent read-only. The KEEL-native freeze-gate (`goldens_match_the_frozen_hash`, seal `db4377b3`) is **ACTIVE + green** (operator re-stamped KEEL-native 2026-06-14; a golden content change now fails the build).
 - **Stage 0 (spine):** complete — three-tier economy (local · cheap-API · frontier) through one invariant chain, file ledger + SQLite Spine (I2), self-resolving substrate, consumable embedded (CLI) **and** over protocol (`serve_openai`).
 - **Stage 1:** `DifficultyRouter` (GOLDEN_ROUTER ✓) + the self-driving engine landed.
-- **Stage 2 (in progress):** `svc::verifier` (I5, GOLDEN_ORACLE ✓) landed and **wired into the running loop** via `kernel::engine` (L1: route → chain → verify → checkpoint → emit). Still ahead: `svc::memory`, `mw::metrics`, privacy rung-3.
-- **Next:** see `_run_state/STATE.md`.
+- **Stage 2 (largely complete):** `svc::verifier` (I5, GOLDEN_ORACLE ✓) wired into the running loop via `kernel::engine` (route → chain → verify → checkpoint → emit). **`svc::memory` shipped** (Tape + Ring-0/2/3/4 + consolidate/cold-eyes); **metrics shipped as an off-loop SQLite-Spine reader** (`keel metrics`, `SqliteStore::metrics()` — a reader, *not* a `mw::metrics` middleware); perception + the flywheel feed (B2/B4) landed. **Still ahead: privacy rung-3** (the ONNX OpenAI filter, ISSUE-2 — operator's stated last).
+- **Stage 3 (flywheel):** `FileTraceSink` (secret-scrubbed corpus) + `distill-export` landed; out-of-band LoRA training deferred.
+- **Next:** see `_run_state/STATE.md` + `docs/PROJECT-STATE.md`.
 
 ## Session protocol
 1. Load the canon + this file.

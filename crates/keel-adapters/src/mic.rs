@@ -42,7 +42,7 @@ impl Microphone {
             cpal::SampleFormat::I16 => device.build_input_stream(
                 &config,
                 move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    sink.lock().expect("mic buffer").extend(data.chunks(channels).map(|f| f[0]));
+                    sink.lock().unwrap_or_else(|p| p.into_inner()).extend(data.chunks(channels).map(|f| f[0]));
                 },
                 err_fn,
                 None,
@@ -65,7 +65,7 @@ impl Microphone {
         std::thread::sleep(Duration::from_secs(seconds as u64));
         drop(stream); // stop capturing
 
-        let samples = buf.lock().expect("mic buffer").clone();
+        let samples = buf.lock().unwrap_or_else(|p| p.into_inner()).clone();
         Ok((samples, sample_rate))
     }
 }

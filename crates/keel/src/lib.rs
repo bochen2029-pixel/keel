@@ -112,7 +112,7 @@ impl Engine {
         // Memory: the Tape-backed `FileMemory` (canon §11) — the lossless factual register. `assemble`
         // injects Ring-0 (empty genome soul; persona is a cell concern) + Ring-2 recent turns read
         // back from the Tape, so working memory persists ACROSS `keel` invocations; the engine appends
-        // each Trace to the Tape post-checkpoint. `TraceSink` (the flywheel feed) stays `None` until Stage 3.
+        // each Trace to the Tape post-checkpoint. The `TraceSink` flywheel feed is wired just below.
         let memory: Option<Arc<dyn keel_contracts::Memory>> = Some(Arc::new(FileMemory::new("", TAPE_PATH, 6)));
         // The flywheel feed (canon §8 step 9): a passed verdict → an append-only distill corpus, with
         // secrets SCRUBBED first (reversibility gate §5) via the SAME `redactor` as the I3 egress mask —
