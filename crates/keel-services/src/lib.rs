@@ -21,6 +21,6 @@ pub mod verifier;
 
 pub use driver::{HeartbeatDriver, UserTurnDriver, WatchDriver};
 pub use memory::FileMemory;
-pub use perception::ChangeGate;
+pub use perception::{ChangeGate, FrameGate};
 pub use router::DifficultyRouter;
 pub use verifier::{GoldenDispatchOracle, GoldenOracle, PropertyOracle, SchemaOracle, SourceOracle, Verifier};

@@ -7,6 +7,13 @@
 //! organs themselves — `PerceptionSource` impls over a real screen/camera/mic + the `see()`/`hear()`
 //! retinas that turn pixels/audio → compact text locally — ride on top of this gate (a later slice,
 //! once the substrate + an image/audio decoder are wired); this is the model-free gate they all share.
+//!
+//! **This slice** adds the no-dep model-free pieces — dHash compute from raw pixels
+//! ([`ChangeGate::dhash`] / [`ChangeGate::dhash_rgba`]) + a stateful [`FrameGate`] — so the change-gate
+//! has real inputs (a raw captured frame is already pixels; no image-decode crate needed). The
+//! OS-capture `PerceptionSource` over a real screen/camera/mic is a dependency- + substrate-gated
+//! follow-on; the `see()` captioning retina rides the cognition protocol (a frame is multi-part image
+//! content, §12) and lands with it.
 
 use keel_adapters::Whisper;
 use keel_contracts::{Modality, Percept, Result, Time};
@@ -55,6 +62,92 @@ impl ChangeGate {
     pub fn audio_voiced(voiced_ms: u32) -> bool {
         voiced_ms > 0
     }
+
+    /// Compute the perceptual **dHash** of a grayscale (luma) frame — the model-free hash the gate
+    /// dedups on. Average-pools the `w`x`h` buffer to 9x8, then sets one bit per adjacent-column
+    /// comparison (8 per row x 8 rows = 64 bits). Pure arithmetic, **no image-decode dependency** (a
+    /// raw captured frame is already pixels). A uniform frame hashes to 0; `w==0`/`h==0`/short
+    /// buffers return 0 (never a panic).
+    pub fn dhash(luma: &[u8], w: usize, h: usize) -> u64 {
+        const TW: usize = 9;
+        const TH: usize = 8;
+        if w == 0 || h == 0 || luma.len() < w * h {
+            return 0;
+        }
+        let mut hash = 0u64;
+        let mut bit = 0u32;
+        for ty in 0..TH {
+            let y0 = ty * h / TH;
+            let y1 = ((ty + 1) * h / TH).clamp(y0 + 1, h);
+            let mut row = [0u32; TW];
+            for (tx, cell) in row.iter_mut().enumerate() {
+                let x0 = tx * w / TW;
+                let x1 = ((tx + 1) * w / TW).clamp(x0 + 1, w);
+                let (mut sum, mut cnt) = (0u32, 0u32);
+                for y in y0..y1 {
+                    for x in x0..x1 {
+                        sum += luma[y * w + x] as u32;
+                        cnt += 1;
+                    }
+                }
+                *cell = sum.checked_div(cnt).unwrap_or(0);
+            }
+            for pair in row.windows(2) {
+                if pair[0] < pair[1] {
+                    hash |= 1u64 << bit;
+                }
+                bit += 1;
+            }
+        }
+        hash
+    }
+
+    /// `dhash` over an RGBA frame: convert to luma (Rec.601: 0.299R + 0.587G + 0.114B) then hash. No
+    /// dep. `w*h==0` / short buffers return 0.
+    pub fn dhash_rgba(rgba: &[u8], w: usize, h: usize) -> u64 {
+        let n = w * h;
+        if n == 0 || rgba.len() < n * 4 {
+            return 0;
+        }
+        let mut luma = vec![0u8; n];
+        for (i, px) in luma.iter_mut().enumerate() {
+            let (r, g, b) = (rgba[i * 4] as u32, rgba[i * 4 + 1] as u32, rgba[i * 4 + 2] as u32);
+            *px = ((r * 299 + g * 587 + b * 114) / 1000) as u8;
+        }
+        Self::dhash(&luma, w, h)
+    }
+}
+
+/// A **stateful** frame change-gate — the capture organ's model-free dedup loop. It remembers the
+/// last *emitted* frame's dHash and reports a new frame as changed when its Hamming distance exceeds
+/// the threshold (the first frame is always new — the baseline). Comparing to the last *emitted*
+/// frame (not the last *seen*) lets slow drift accumulate until it genuinely crosses the bar; a static
+/// screen never re-emits, so the cognition model is never re-consulted (NFR §19 perception thrift).
+#[derive(Clone, Debug, Default)]
+pub struct FrameGate {
+    gate: ChangeGate,
+    last: Option<u64>,
+}
+
+impl FrameGate {
+    /// A frame gate with an explicit dHash threshold (else [`FrameGate::default`] uses [`FRAME_DHASH_THRESHOLD`]).
+    pub fn new(threshold: u32) -> Self {
+        Self { gate: ChangeGate::new(threshold), last: None }
+    }
+
+    /// Report whether `dhash` is a new frame (the first frame, or a Hamming distance over the
+    /// threshold), updating the remembered hash only when it is — so the next comparison is against
+    /// the last *emitted* frame.
+    pub fn changed(&mut self, dhash: u64) -> bool {
+        let changed = match self.last {
+            None => true,
+            Some(prev) => self.gate.frame_changed(ChangeGate::dhash_distance(prev, dhash)),
+        };
+        if changed {
+            self.last = Some(dhash);
+        }
+        changed
+    }
 }
 
 /// Build an Audio [`Percept`] from a transcript (canon §12). Model-free assembly: the transcript came
@@ -68,6 +161,34 @@ pub fn percept_from_transcript(transcript: impl Into<String>, source: impl Into<
         source: source.into(),
         confidence: 1.0,
     }
+}
+
+/// The **`see()` retina** (canon §12): dHash change-gate → an Image [`Percept`] on visual change. A
+/// static frame (the gate reports unchanged) returns `None` — GPU-free, the cognition model is never
+/// consulted (NFR §19 perception thrift). A changed frame emits an Image `Percept` referencing the
+/// frame; `source` is the **capture topology** ("screen"/"camera"), never a model. The frame then
+/// rides the cognition protocol as image content (§12) — the local vision tier captions/reasons over
+/// it downstream (image content forces `local`, I3). `gate` holds the last-emitted hash; an OS-capture
+/// `PerceptionSource` over a real screen feeds the `rgba` frames in (a later, dependency-gated slice).
+pub fn see(
+    gate: &mut FrameGate,
+    frame_ref: impl Into<String>,
+    rgba: &[u8],
+    w: usize,
+    h: usize,
+    source: impl Into<String>,
+    t_utc: Time,
+) -> Option<Percept> {
+    if !gate.changed(ChangeGate::dhash_rgba(rgba, w, h)) {
+        return None; // unchanged frame: gated, never re-captioned
+    }
+    Some(Percept {
+        content: serde_json::json!({ "frame": frame_ref.into() }),
+        t_utc,
+        modality: Modality::Image,
+        source: source.into(),
+        confidence: 1.0,
+    })
 }
 
 /// The **`hear()` retina** (canon §12): VAD-gate → transcribe (the local Whisper organ) → `Percept`.
@@ -134,6 +255,96 @@ mod tests {
         // VAD: silence is free, voiced emits.
         assert!(!ChangeGate::audio_voiced(0));
         assert!(ChangeGate::audio_voiced(120));
+    }
+
+    // ── dHash from raw pixels + the stateful frame gate (the capture organ's model-free core) ──
+
+    #[test]
+    fn dhash_of_a_uniform_frame_is_zero() {
+        // a flat frame has no adjacent-column differences -> hash 0 -> distance 0 -> gated.
+        let flat = vec![128u8; 100 * 80];
+        assert_eq!(ChangeGate::dhash(&flat, 100, 80), 0);
+        // guards: zero dims / short buffers -> 0, never a panic.
+        assert_eq!(ChangeGate::dhash(&flat, 0, 80), 0);
+        assert_eq!(ChangeGate::dhash(&[], 100, 80), 0);
+    }
+
+    #[test]
+    fn dhash_distinguishes_a_gradient_from_flat() {
+        // a left->right brightness gradient differs from a flat frame by many bits.
+        let (w, h) = (90usize, 80usize);
+        let mut grad = vec![0u8; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                grad[y * w + x] = (x * 255 / (w - 1)) as u8;
+            }
+        }
+        let gh = ChangeGate::dhash(&grad, w, h);
+        let fh = ChangeGate::dhash(&vec![128u8; w * h], w, h);
+        assert_ne!(gh, 0, "a gradient sets bits");
+        assert!(ChangeGate::dhash_distance(gh, fh) > 4, "gradient vs flat is a real change");
+    }
+
+    #[test]
+    fn dhash_rgba_matches_its_luma() {
+        // a gray RGBA frame (R=G=B=v, A=255) hashes identically to the luma frame of value v.
+        let (w, h) = (90usize, 80usize);
+        let mut luma = vec![0u8; w * h];
+        let mut rgba = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let v = (x * 255 / (w - 1)) as u8;
+                luma[y * w + x] = v;
+                let i = (y * w + x) * 4;
+                rgba[i] = v;
+                rgba[i + 1] = v;
+                rgba[i + 2] = v;
+                rgba[i + 3] = 255;
+            }
+        }
+        assert_eq!(ChangeGate::dhash_rgba(&rgba, w, h), ChangeGate::dhash(&luma, w, h));
+    }
+
+    #[test]
+    fn frame_gate_emits_on_change_skips_static() {
+        let (w, h) = (90usize, 80usize);
+        let flat = ChangeGate::dhash(&vec![100u8; w * h], w, h);
+        let mut grad = vec![0u8; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                grad[y * w + x] = (x * 255 / (w - 1)) as u8;
+            }
+        }
+        let grad_h = ChangeGate::dhash(&grad, w, h);
+
+        let mut g = FrameGate::default();
+        assert!(g.changed(flat), "first frame is the baseline -> emits");
+        assert!(!g.changed(flat), "identical frame -> gated (free)");
+        assert!(g.changed(grad_h), "a big change -> emits");
+        assert!(!g.changed(grad_h), "same again -> gated");
+    }
+
+    #[test]
+    fn see_gates_static_frames_and_emits_an_image_percept_on_change() {
+        let (w, h) = (90usize, 80usize);
+        let flat = vec![100u8; w * h * 4];
+        let mut grad = vec![0u8; w * h * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let (i, v) = ((y * w + x) * 4, (x * 255 / (w - 1)) as u8);
+                grad[i] = v;
+                grad[i + 1] = v;
+                grad[i + 2] = v;
+                grad[i + 3] = 255;
+            }
+        }
+        let mut g = FrameGate::default();
+        let p = see(&mut g, "frame-0", &flat, w, h, "screen", 1).expect("first frame emits a Percept");
+        assert_eq!(p.modality, Modality::Image);
+        assert_eq!(p.source, "screen"); // capture topology, not a model
+        assert_eq!(p.content["frame"].as_str(), Some("frame-0"));
+        assert!(see(&mut g, "frame-1", &flat, w, h, "screen", 2).is_none(), "static frame -> gated");
+        assert!(see(&mut g, "frame-2", &grad, w, h, "screen", 3).is_some(), "visual change -> emits");
     }
 
     // ── the hear() retina (canon §12): VAD-gate → whisper → Percept ──
