@@ -19,7 +19,7 @@
 
 ---
 
-## 1 · The ten things you must not get wrong (the anti-drift list)
+## 1 · The eleven things you must not get wrong (the anti-drift list)
 
 Read these now; the rest of the brief justifies and expands them. If you ever feel uncertain, re-read this list.
 
@@ -33,6 +33,7 @@ Read these now; the rest of the brief justifies and expands them. If you ever fe
 8. **Genome = the INTERSECTION of the operator's projects, never their union.** "Universal/extensible" means *only what this operator needs*. The moment a vertical's heavy apparatus migrates into the core, KEEL stops being able to serve the others. Refuse periphery into the core (canon §16).
 9. **The reversibility gate + hard prohibitions** (see `AUTONOMY_CHARTER.md`): no `git reset --hard`/`clean -fd`/`checkout -- <path>`/`restore` on uncommitted work; no force-push; no `branch -D` on unmerged `auto/`; no `rm`/`Remove-Item -Recurse -Force` outside `.\.keelstate\`; **never mutate the global Rust toolchain** without asking (DAVE/TERMINAL share it); **never commit a key** (they live in env). Any action whose undo cost you can't state in one sentence → **stop and ask.**
 10. **One slice at a time, banked clean.** Contract-first; build the next slice; make its golden/test green; end with layer-check → budget → golden-freeze-unchanged → `cargo test` green → **one commit, one-line intent**, push only when asked. The operator gates step-by-step; do not scope-creep or barrel ahead.
+11. **Perception is FIRST-CLASS genome, NOT "heavy periphery."** Eyes = **native Qwen3.5-9B vision** (`mmproj` is *its* projector, not a separate VLM — the model IS the retina); ears = **Whisper**. KEEL exists *so apps reuse this wiring* — NightScribe hand-fused Qwen-vision + Whisper *before KEEL* (the **.NET-of-AI-apps** case). Build the senses + their capture feeds **confidently**: the feeds (screen-grab, mic) are **toggleable modules** (§3.5); the *models* are **resolved-not-embedded** (§2.9, only SQLite is baked in); and the §16 anti-bloat refusal targets a vertical's *apparatus*, **never the core's own afferent senses.** Never flag a sense as a scary dependency — that inverts the priority. (Only *efferent* — TTS/image-gen — is deferred, §2.8.)
 
 ---
 
