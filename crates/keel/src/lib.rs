@@ -16,7 +16,8 @@
 
 use keel_adapters::{Anthropic, DeepSeek, LocalLlama};
 use keel_contracts::{
-    Context, GenerateRequest, GenerateResult, GoldenCase, KeelError, ModelTier, Oracle, Result, Router, Spine, Step,
+    Context, Driver, GenerateRequest, GenerateResult, GoldenCase, KeelError, ModelTier, Oracle, Result, Router, Spine,
+    Step,
 };
 use keel_kernel::engine::{Engine as KernelEngine, EngineConfig, TierSlot};
 use keel_kernel::{Chain, Manifest, Registry, TierCfg};
@@ -140,6 +141,21 @@ impl Engine {
     /// Manual override: run on a named wired tier, skipping route + verify (the full chain still runs).
     pub async fn run_on(&self, tier: &str, ctx: &Context, req: GenerateRequest) -> Result<GenerateResult> {
         self.0.run_on(tier, ctx, req).await
+    }
+
+    /// One driver tick (canon §8 `select(drivers).poll()`): select a Step from the drivers in priority
+    /// order and run it through the full loop; `Ok(None)` = every driver idle. The L5 `keel daemon`
+    /// loop calls this with a distinct `trace_id` per attempt so each turn checkpoints as its own run.
+    pub async fn tick(&self, drivers: &[Arc<dyn Driver>], ctx: &mut Context) -> Result<Option<Outcome>> {
+        self.0.tick(drivers, ctx).await
+    }
+
+    /// The bounded driver loop (canon §8): [`tick`](Engine::tick) up to `max_ticks` times, stopping
+    /// early when every driver is idle. Each turn gets a distinct `trace_id` (`{base}-{n}`) so it
+    /// checkpoints + Tapes as its own run. The continuously-running form (idle = sleep) is the
+    /// `keel daemon` wrapper in `main.rs`; this is the bounded burst.
+    pub async fn run_until_idle(&self, drivers: &[Arc<dyn Driver>], ctx: &mut Context, max_ticks: usize) -> Result<Vec<Outcome>> {
+        self.0.run_until_idle(drivers, ctx, max_ticks).await
     }
 }
 
@@ -283,4 +299,57 @@ fn load_goldens(path: &str) -> HashMap<String, GoldenCase> {
         }
     }
     map
+}
+
+// ── the Driver daemon helpers (L5; the loop logic lives in kernel::engine) ──────
+
+/// A file-change token for a [`WatchDriver`](keel_services::WatchDriver) probe: combines the path's
+/// mtime + length into one comparable `u64`, or `None` if the path is absent/unreadable. **Model-free**
+/// — a plain token, never a model judgement (the same discipline as perception's dHash gate). A change
+/// to the file's content (length) or mtime changes the token, so the watch fires on the next poll.
+pub fn watch_token(path: &std::path::Path) -> Option<u64> {
+    let meta = std::fs::metadata(path).ok()?;
+    let mtime = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    Some(mtime.wrapping_shl(1) ^ meta.len())
+}
+
+/// The daemon's bound decision: **perpetual** (run until interrupted) when `--max-ticks 0`, or when a
+/// `--watch` is set without an explicit `--max-ticks` (a watch is a perpetual mode); else **bounded**
+/// by `--max-ticks` (default 1 — a single self-tick that terminates). Keeps the autonomous default safe
+/// (a plain `keel daemon` runs one tick and exits, never an unbounded loop).
+pub fn daemon_perpetual(max_ticks: usize, max_ticks_set: bool, has_watch: bool) -> bool {
+    max_ticks == 0 || (has_watch && !max_ticks_set)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn watch_token_changes_on_edit_and_is_none_when_absent() {
+        let path = std::env::temp_dir().join(format!("keel_watch_test_{}.txt", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        assert!(watch_token(&path).is_none(), "absent path -> None (nothing to observe)");
+        std::fs::write(&path, b"one").unwrap();
+        let t1 = watch_token(&path).expect("present file -> a token");
+        std::fs::write(&path, b"a longer body").unwrap(); // changes length -> token differs even if mtime equal
+        let t2 = watch_token(&path).expect("still present");
+        assert_ne!(t1, t2, "a content change changes the token -> the watch fires");
+        std::fs::remove_file(&path).unwrap();
+        assert!(watch_token(&path).is_none(), "removed -> None");
+    }
+
+    #[test]
+    fn daemon_perpetual_rules() {
+        assert!(!daemon_perpetual(1, true, false), "default bounded");
+        assert!(!daemon_perpetual(5, true, false), "explicit bound");
+        assert!(daemon_perpetual(0, true, false), "--max-ticks 0 -> perpetual");
+        assert!(daemon_perpetual(1, false, true), "--watch w/o explicit bound -> perpetual");
+        assert!(!daemon_perpetual(3, true, true), "--watch + explicit bound -> bounded");
+    }
 }
