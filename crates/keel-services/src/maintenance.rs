@@ -70,6 +70,27 @@ impl MaintenancePolicy {
     }
 }
 
+/// A parsed cold-eyes verdict (A7.5). The reviewer replies exactly `CONSISTENT`, or lists the
+/// unsupported claims one per line — this splits the two, model-free.
+#[derive(Clone, Debug)]
+pub struct ColdEyesVerdict {
+    pub consistent: bool,
+    /// The drift findings (non-empty lines, bounded — a runaway reply never floods the correction prompt).
+    pub findings: Vec<String>,
+}
+
+/// Parse a cold-eyes reply: `CONSISTENT` (leading, case-insensitive — the prompt demands exactly
+/// that word) means no drift; anything else is a drift report whose non-empty lines are findings.
+pub fn parse_cold_eyes(text: &str) -> ColdEyesVerdict {
+    let t = text.trim();
+    if t.to_uppercase().starts_with("CONSISTENT") {
+        return ColdEyesVerdict { consistent: true, findings: Vec::new() };
+    }
+    let findings: Vec<String> =
+        t.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).take(16).collect();
+    ColdEyesVerdict { consistent: findings.is_empty(), findings }
+}
+
 /// The autopilot's durable cursor (a small JSON sidecar of the Tape, `<tape_stem>.maint.json`):
 /// where the last consolidation left off + the cold-eyes cadence counter + the A7.5 drift flag.
 /// Derived state — deleting it just resets the cadence (the registers themselves are untouched).
@@ -155,6 +176,18 @@ mod tests {
         s.consolidations_since_cold_eyes = 9;
         s.turns_total = 40;
         assert_eq!(p.due(&s), Some(Maintenance::Consolidate));
+    }
+
+    #[test]
+    fn parse_cold_eyes_splits_consistent_from_drift() {
+        assert!(parse_cold_eyes("CONSISTENT").consistent);
+        assert!(parse_cold_eyes("  consistent - every claim is supported").consistent, "case/prefix tolerant");
+        let v = parse_cold_eyes("The narrative claims X happened.\n\nIt also claims Y.");
+        assert!(!v.consistent);
+        assert_eq!(v.findings.len(), 2, "non-empty lines become findings");
+        assert!(parse_cold_eyes("   ").consistent, "an empty reply flags nothing (no invented drift)");
+        let long = (0..40).map(|i| format!("claim {i}")).collect::<Vec<_>>().join("\n");
+        assert_eq!(parse_cold_eyes(&long).findings.len(), 16, "findings are bounded");
     }
 
     #[test]

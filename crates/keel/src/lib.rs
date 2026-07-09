@@ -148,10 +148,61 @@ pub async fn run_cold_eyes_turn(
     Ok(Some(outcome.result.content.trim().to_string()))
 }
 
+/// A7.5 — one **corrective** consolidation after cold-eyes flagged drift: regenerate the narrative
+/// from the ground-truth registers (Tape + episodes; the drifted copy is excluded — REEL §10.2),
+/// store the narrative ONLY (a correction appends no episode). Returns the stored chars (0 = empty).
+pub async fn run_corrective_turn(
+    engine: &Engine,
+    mem: &keel_services::FileMemory,
+    findings: &[String],
+    ctx: &mut Context,
+) -> Result<usize> {
+    let prompt = mem.corrective_consolidation_prompt(findings);
+    let mut step = Step {
+        kind: Kind::CoreWire,
+        ty: "memory:correct".into(),
+        trust_required: Trust::Normal,
+        data_class: DataClass::Sovereign, // personal memory stays on-box (I3)
+        tier_history: vec![],
+        oracle_failures: 0,
+        projected_cost: None,
+        critical: false,
+        source: Some("memory".into()),
+        content: vec![Content::Text { text: prompt }],
+        golden_refs: vec![],
+    };
+    let req = keel_kernel::engine::request_from_step(&step);
+    let outcome = engine.run(&mut step, ctx, req).await?;
+    mem.store_corrected_narrative(&outcome.result.content)
+}
+
+/// A7.5 — an I1 event for a memory-drift action (labels + counts only, never narrative content —
+/// the same discipline as redaction events, canon §5.1). Best-effort: an audit-write failure is
+/// reported, never fatal to maintenance.
+fn audit_memory_event(trace_id: &str, code: &str, findings: usize, ok: bool) {
+    let ev = keel_middleware::AuditEvent {
+        trace_id: trace_id.to_string(),
+        t_utc: keel_kernel::now_millis(),
+        model: "ring3-narrative".to_string(),
+        tier: "memory".to_string(),
+        cost: 0.0,
+        ok,
+        code: code.to_string(),
+        redactions: vec![format!("findings:{findings}")],
+    };
+    match FileAuditSink::new(AUDIT_LEDGER) {
+        Ok(sink) => keel_middleware::AuditSink::emit(&sink, &ev),
+        Err(e) => eprintln!("[keel] memory: audit event failed ({e})"),
+    }
+}
+
 /// A7.4 — the autopilot maintenance pass: run whatever the keel.lock policy says is due (at most
 /// one consolidation + one cold-eyes per pass — bounded, never a loop). **Zero flags, zero
 /// operator surface**: the CLI calls this at session end, the daemon per tick, serve after a
 /// response. Maintenance failures are reported on stderr and never fail the caller's turn.
+/// A7.5 rides the cold-eyes arm: drift → ONE corrective regenerate-from-ground-truth (audited
+/// `MEMORY_DRIFT_CORRECTED`); drift again before a CONSISTENT pass → `MEMORY_DRIFT_PERSISTENT`
+/// (surfaced for the operator, never a correction loop).
 pub async fn run_maintenance(
     engine: &Engine,
     mem: &keel_services::FileMemory,
@@ -206,11 +257,35 @@ pub async fn run_maintenance(
                 match run_cold_eyes_turn(engine, mem, ctx).await {
                     Ok(Some(verdict)) => {
                         state.consolidations_since_cold_eyes = 0;
-                        // A7.5 extends this arm: parse the verdict, one bounded correction, I1 event.
-                        if verdict.to_uppercase().starts_with("CONSISTENT") {
-                            eprintln!("[keel] memory: cold-eyes CONSISTENT (narrative matches the Tape)");
+                        let v = keel_services::parse_cold_eyes(&verdict);
+                        if v.consistent {
+                            if state.pending_drift {
+                                eprintln!("[keel] memory: cold-eyes CONSISTENT - the drift correction held");
+                            } else {
+                                eprintln!("[keel] memory: cold-eyes CONSISTENT (narrative matches the Tape)");
+                            }
+                            state.pending_drift = false;
+                        } else if state.pending_drift {
+                            // drift AGAIN before a CONSISTENT pass = PERSISTENT — surface it for the
+                            // operator (I1 alarm event), never a correction loop.
+                            eprintln!(
+                                "[keel] memory: !! PERSISTENT narrative drift after a correction - operator attention:\n{}",
+                                v.findings.join("\n")
+                            );
+                            audit_memory_event(&ctx.trace_id, "MEMORY_DRIFT_PERSISTENT", v.findings.len(), false);
                         } else {
-                            eprintln!("[keel] memory: cold-eyes flagged drift:\n{verdict}");
+                            // A7.5: ONE bounded correction — regenerate from ground truth (REEL §10.2).
+                            eprintln!("[keel] memory: cold-eyes flagged drift - regenerating the narrative from ground truth");
+                            ctx.trace_id = format!("{base}-correct");
+                            match run_corrective_turn(engine, mem, &v.findings, ctx).await {
+                                Ok(n) if n > 0 => {
+                                    state.pending_drift = true; // cleared when a later cold-eyes reads CONSISTENT
+                                    audit_memory_event(&ctx.trace_id, "MEMORY_DRIFT_CORRECTED", v.findings.len(), true);
+                                    eprintln!("[keel] memory: corrected narrative stored ({n} chars); the next cold-eyes confirms");
+                                }
+                                Ok(_) => eprintln!("[keel] memory: correction returned empty - narrative left as-is"),
+                                Err(e) => eprintln!("[keel] memory: correction error: {e}"),
+                            }
                         }
                     }
                     Ok(None) => state.consolidations_since_cold_eyes = 0,

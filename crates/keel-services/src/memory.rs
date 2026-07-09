@@ -541,6 +541,57 @@ impl FileMemory {
         Some(p)
     }
 
+    /// A7.5 — the **regenerate-from-ground-truth** prompt: a corrective consolidation after cold-eyes
+    /// flagged drift. The REEL §10.2 fix — the narrative is rebuilt from the SOURCE registers (the
+    /// Tape + the episodes), and the drifted copy is deliberately NOT included (never re-anchor on
+    /// drifted text). Pure string assembly (model-free, unit-testable).
+    pub fn corrective_consolidation_prompt(&self, findings: &[String]) -> String {
+        let mut p = String::from(
+            "A fresh reviewer diffed your memory narrative against the lossless Tape (the ground \
+             truth) and found claims the Tape does NOT support:\n",
+        );
+        for f in findings {
+            p.push_str("- ");
+            p.push_str(f);
+            p.push('\n');
+        }
+        p.push_str(
+            "\nRegenerate the narrative FROM THE GROUND TRUTH below - drop or correct every \
+             unsupported claim; keep only what the Tape and episodes support. Do not restate facts \
+             as if you are their source (the Tape is). Reply with ONLY the corrected narrative text.\n",
+        );
+        if let Some(c) = chars_cap(self.budget.ring3) {
+            p.push_str(&format!("Keep it under about {c} characters.\n"));
+        }
+        let eps = self.read_episodes(5);
+        if !eps.is_empty() {
+            p.push_str("\nEpisodes (durable digests, oldest first):\n");
+            for e in &eps {
+                p.push_str(&e.text());
+                p.push('\n');
+            }
+        }
+        p.push_str("\nTAPE (the facts, oldest first):\n");
+        for t in &self.recent_traces(self.working_turns) {
+            p.push_str(&Self::summarize(t));
+            p.push('\n');
+        }
+        p
+    }
+
+    /// Store a corrective turn's output as the Ring-3 narrative (A7.5): narrative ONLY — a correction
+    /// appends **no episode** (nothing new happened; the mid-resolution history stays honest). A model
+    /// that still emits the two-section layout is tolerated (only the narrative part is kept).
+    pub fn store_corrected_narrative(&self, output: &str) -> Result<usize> {
+        let (narrative, _) = Self::parse_consolidation(output.trim());
+        let n = narrative.chars().count();
+        if n == 0 {
+            return Ok(0);
+        }
+        self.set_narrative(&narrative)?;
+        Ok(n)
+    }
+
     /// Read the last `n` traces from the Tape in chronological order (best-effort: a missing or
     /// short Tape yields fewer; an unparseable line is skipped, never fatal — the Tape outlives schema).
     fn recent_traces(&self, n: usize) -> Vec<Trace> {
@@ -1207,6 +1258,52 @@ mod tests {
         let a = mem.assemble(&q, &Context::default()).await.unwrap();
         assert!(vec_path_for(&tape).exists(), "backfill created the turn sidecar from the Tape");
         assert!(a.system.contains("Paris"), "the pre-embedder turn is immediately recallable");
+        clean_ring4(&tape);
+    }
+
+    // ── A7.5: the self-correcting narrative (regenerate from ground truth) ──
+
+    #[tokio::test]
+    async fn corrective_prompt_carries_findings_and_ground_truth_never_the_drifted_narrative() {
+        let tape = temp_tape("correct");
+        clean_ring4(&tape);
+        let mem = FileMemory::new("", &tape, 5);
+        mem.record(&trace("what is my number", "42")).await.unwrap();
+        mem.store_consolidation(
+            "=== NARRATIVE ===\nDRIFTED-SKY-GREEN claim.\n=== EPISODE ===\nhappened: number recorded\nchanged: -\nmatters: -\nunresolved: -\nanchors: number\n",
+        )
+        .await
+        .unwrap();
+        let p = mem.corrective_consolidation_prompt(&["claims the sky is green".to_string()]);
+        assert!(p.contains("claims the sky is green"), "the findings ride the prompt");
+        assert!(p.contains("42"), "the Tape ground truth is included");
+        assert!(p.contains("[episode] number recorded"), "the episode digests are included");
+        assert!(!p.contains("DRIFTED-SKY-GREEN"), "the drifted narrative is EXCLUDED (REEL 10.2 - never re-anchor on drift)");
+        clean_ring4(&tape);
+    }
+
+    #[tokio::test]
+    async fn store_corrected_narrative_overwrites_without_appending_an_episode() {
+        let tape = temp_tape("correct-store");
+        clean_ring4(&tape);
+        let mem = FileMemory::new("", &tape, 5);
+        mem.store_consolidation(
+            "=== NARRATIVE ===\nold arc\n=== EPISODE ===\nhappened: h\nchanged: c\nmatters: m\nunresolved: u\nanchors: a\n",
+        )
+        .await
+        .unwrap();
+        assert_eq!(mem.episodes_count(), 1);
+        let n = mem.store_corrected_narrative("corrected arc, drift removed").unwrap();
+        assert!(n > 0);
+        assert_eq!(mem.narrative().unwrap(), "corrected arc, drift removed");
+        assert_eq!(mem.episodes_count(), 1, "a correction appends NO episode (nothing new happened)");
+        // a model that still emits the two-section layout is tolerated - only the narrative is kept.
+        let n2 = mem
+            .store_corrected_narrative("=== NARRATIVE ===\nlayouted correction\n=== EPISODE ===\nhappened: x\nchanged: y\nmatters: z\nunresolved: -\nanchors: q\n")
+            .unwrap();
+        assert!(n2 > 0);
+        assert_eq!(mem.narrative().unwrap(), "layouted correction");
+        assert_eq!(mem.episodes_count(), 1, "still no episode on a correction");
         clean_ring4(&tape);
     }
 
