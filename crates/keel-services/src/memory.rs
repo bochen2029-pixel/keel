@@ -37,7 +37,8 @@
 use crate::recall::{cosine, Embed, Fingerprint};
 use async_trait::async_trait;
 use keel_contracts::{
-    AssembledContext, Content, Context, DataClass, KeelError, Kind, Memory, Result, Step, TokenBudget, Trace, Trust,
+    AssembledContext, Content, Context, DataClass, KeelError, Kind, Memory, Message, Result, Role, Step, TokenBudget,
+    Trace, Trust,
 };
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -128,6 +129,12 @@ pub struct FileMemory {
     /// Cold-start backfill (A7.3): when the turn sidecar is absent but the Tape has turns, embed the
     /// last N summaries once, lazily, on the next assemble (bounded — never O(Tape)).
     backfill: usize,
+    /// Ring-1 calibration exemplars (A7.6): an operator/cell-authored markdown pool
+    /// (`<tape_stem>.exemplars.md`, `## `-sectioned). Absent = zero cost (the genome default).
+    exemplars_file: PathBuf,
+    /// A7.6 (opt-in): inject Ring-2 as REAL `user`/`assistant` conversation messages instead of a
+    /// system-preamble block (needs the engine's `AssembledContext.conversation` splice — landed).
+    ring2_conversation: bool,
     /// How many semantically-relevant earlier turns Ring-4 injects (0 = off).
     recall_k: usize,
     /// A7.1 — the per-ring context budget (canon §7 "ringed + budgeted"; REEL §4.7). Declared in
@@ -148,6 +155,7 @@ impl FileMemory {
         let vecs = vec_path_for(&tape);
         let episodes = episodes_path_for(&tape);
         let epvecs = epvec_path_for(&tape);
+        let exemplars_file = exemplars_path_for(&tape);
         Self {
             soul: soul.into(),
             tape,
@@ -161,8 +169,50 @@ impl FileMemory {
             backfill: 32,
             recall_k: 0,
             budget: Self::default_budget(),
+            exemplars_file,
+            ring2_conversation: false,
             lock: Mutex::new(()),
         }
+    }
+
+    /// A7.6 (opt-in): Ring-2 as real conversation messages. The genome default keeps the system
+    /// preamble (proven live); a persona-shaped cell flips this for natural dialogue continuity.
+    pub fn with_ring2_as_conversation(mut self) -> Self {
+        self.ring2_conversation = true;
+        self
+    }
+
+    /// Where a cell/operator authors the Ring-1 exemplar pool (`## `-sectioned markdown; the FIRST
+    /// section is the calibration anchor and always loads; sections are never auto-deleted — REEL
+    /// §3.4 identity protection is editorial, not automated).
+    pub fn exemplars_path(&self) -> PathBuf {
+        self.exemplars_file.clone()
+    }
+
+    /// Read the exemplar pool as sections (split on `## ` headers; text before the first header is
+    /// a comment area and ignored). Absent/empty file → no sections (zero context cost).
+    fn exemplar_sections(&self) -> Vec<String> {
+        let Ok(raw) = std::fs::read_to_string(&self.exemplars_file) else { return Vec::new() };
+        let mut sections: Vec<String> = Vec::new();
+        let mut cur = String::new();
+        let mut started = false;
+        for line in raw.lines() {
+            if line.starts_with("## ") {
+                if started && !cur.trim().is_empty() {
+                    sections.push(cur.trim().to_string());
+                }
+                cur = String::from(line);
+                cur.push('\n');
+                started = true;
+            } else if started {
+                cur.push_str(line);
+                cur.push('\n');
+            }
+        }
+        if started && !cur.trim().is_empty() {
+            sections.push(cur.trim().to_string());
+        }
+        sections
     }
 
     /// Tune the Ring-4 scan bound + cold-start backfill (A7.3; keel.lock `memory.recall_window` /
@@ -661,6 +711,14 @@ fn epvec_path_for(tape: &Path) -> PathBuf {
     p
 }
 
+/// The Ring-1 exemplar-pool path (A7.6): `<tape_dir>/<tape_stem>.exemplars.md` — operator/cell-authored.
+fn exemplars_path_for(tape: &Path) -> PathBuf {
+    let stem = tape.file_stem().and_then(|s| s.to_str()).unwrap_or("tape");
+    let mut p = tape.to_path_buf();
+    p.set_file_name(format!("{stem}.exemplars.md"));
+    p
+}
+
 #[async_trait]
 impl Memory for FileMemory {
     /// Ring-0 (soul) + Ring-2 (recent working turns from the Tape), folded into the `system` preamble
@@ -668,6 +726,27 @@ impl Memory for FileMemory {
     /// engine then prepends nothing.
     async fn assemble(&self, step: &Step, _ctx: &Context) -> Result<AssembledContext> {
         let mut system = self.soul.clone(); // Ring-0 (soul / persona) — NEVER trimmed (REEL §3.4)
+        // Ring-1 (A7.6): calibration exemplars — the anchor (first section) always loads, then the
+        // most recently authored others, the whole block under the ring-1 budget (REEL §4.2; the
+        // pool itself is operator-authored and never auto-deleted — identity protection is editorial).
+        let sections = self.exemplar_sections();
+        if !sections.is_empty() {
+            let mut picked: Vec<&String> = vec![&sections[0]];
+            let mut rest: Vec<&String> = sections.iter().skip(1).rev().take(2).collect();
+            rest.reverse();
+            picked.extend(rest);
+            let mut block = picked.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n\n");
+            if let Some(c) = chars_cap(self.budget.ring1) {
+                if block.chars().count() > c {
+                    block = format!("{}\n...[exemplars trimmed to budget]", take_chars(&block, c));
+                }
+            }
+            if !system.is_empty() {
+                system.push_str("\n\n");
+            }
+            system.push_str("Calibration exemplars (how you engage):\n");
+            system.push_str(&block);
+        }
         // Ring-3: the model-authored narrative arc (lossy; facts of record stay in the Tape, I5),
         // hard-trimmed to its budget (A7.1) — head kept (the durable arc leads), marker on a cut.
         if let Some(narrative) = self.narrative() {
@@ -687,26 +766,30 @@ impl Memory for FileMemory {
         // to chronological order). The newest turn always survives — trimmed to the cap if it alone
         // exceeds it — so working memory never goes fully blind under pressure.
         let recent = self.recent_traces(self.working_turns);
-        let ring2: Vec<String> = {
+        let (ring2_traces, ring2): (Vec<usize>, Vec<String>) = {
             let cap = chars_cap(self.budget.ring2);
-            let mut chosen: Vec<String> = Vec::new();
+            let mut idxs: Vec<usize> = Vec::new();
+            let mut texts: Vec<String> = Vec::new();
             let mut used = 0usize;
-            for t in recent.iter().rev() {
+            for (i, t) in recent.iter().enumerate().rev() {
                 let entry = Self::summarize(t);
                 let len = entry.chars().count() + 1;
                 match cap {
-                    Some(c) if chosen.is_empty() && len > c => {
-                        chosen.push(format!("{}...", take_chars(&entry, c.saturating_sub(3))));
+                    Some(c) if texts.is_empty() && len > c => {
+                        idxs.push(i);
+                        texts.push(format!("{}...", take_chars(&entry, c.saturating_sub(3))));
                         break;
                     }
                     Some(c) if used + len > c => break,
                     _ => {}
                 }
                 used += len;
-                chosen.push(entry);
+                idxs.push(i);
+                texts.push(entry);
             }
-            chosen.reverse();
-            chosen
+            idxs.reverse();
+            texts.reverse();
+            (idxs, texts)
         };
         // Ring-4: semantically-relevant EARLIER turns (canon §11) — embed the current query, cosine-rank
         // the vector sidecar, inject the top-k under the ring-4 budget (excluding what Ring-2 already
@@ -761,8 +844,34 @@ impl Memory for FileMemory {
                 }
             }
         }
-        // Ring-2: the recent working turns, read back from the Tape (chronological, budget-selected).
-        if !ring2.is_empty() {
+        // Ring-2: the recent working turns (chronological, budget-selected) — a system-preamble
+        // block by default, or REAL conversation messages when the cell opts in (A7.6; the engine
+        // splices `AssembledContext.conversation` before the live turn).
+        let mut conversation: Vec<Message> = Vec::new();
+        if self.ring2_conversation {
+            let cap = chars_cap(self.budget.ring2).unwrap_or(usize::MAX);
+            for &i in &ring2_traces {
+                let t = &recent[i];
+                let user = t
+                    .step
+                    .content
+                    .iter()
+                    .find_map(|c| match c {
+                        Content::Text { text } => Some(text.trim()),
+                        _ => None,
+                    })
+                    .unwrap_or("");
+                let msg = |role: Role, text: &str| Message {
+                    role,
+                    content: vec![Content::Text { text: take_chars(text, cap).to_string() }],
+                    name: None,
+                    reasoning_content: None,
+                    tool_call_id: None,
+                };
+                conversation.push(msg(Role::User, user));
+                conversation.push(msg(Role::Assistant, t.result.content.trim()));
+            }
+        } else if !ring2.is_empty() {
             if !system.is_empty() {
                 system.push_str("\n\n");
             }
@@ -772,7 +881,7 @@ impl Memory for FileMemory {
                 system.push_str(e);
             }
         }
-        Ok(AssembledContext { system, budget: self.budget.clone(), ..Default::default() })
+        Ok(AssembledContext { system, conversation, budget: self.budget.clone(), ..Default::default() })
     }
 
     /// Append the full `Trace` to the Tape as one JSONL line — the lossless factual register (§11).
@@ -1304,6 +1413,55 @@ mod tests {
         assert!(n2 > 0);
         assert_eq!(mem.narrative().unwrap(), "layouted correction");
         assert_eq!(mem.episodes_count(), 1, "still no episode on a correction");
+        clean_ring4(&tape);
+    }
+
+    // ── A7.6: Ring-1 exemplars + Ring-2 as conversation ──
+
+    #[tokio::test]
+    async fn ring1_exemplars_load_anchor_plus_recent_under_budget() {
+        let tape = temp_tape("exemplars");
+        clean_ring4(&tape);
+        let mem = FileMemory::new("", &tape, 5);
+        std::fs::write(
+            mem.exemplars_path(),
+            "pool notes (ignored preamble)\n## Anchor\nthe calibration anchor\n## Old\nold exemplar\n## Mid\nmid exemplar\n## New\nnewest exemplar\n",
+        )
+        .unwrap();
+        let a = mem.assemble(&base_step(), &Context::default()).await.unwrap();
+        assert!(a.system.contains("Calibration exemplars"), "Ring-1 label");
+        assert!(a.system.contains("the calibration anchor"), "the anchor ALWAYS loads");
+        assert!(a.system.contains("newest exemplar") && a.system.contains("mid exemplar"), "the most recent others rotate in");
+        assert!(!a.system.contains("old exemplar"), "older pool sections stay in the pool (rotation, never deletion)");
+        assert!(!a.system.contains("pool notes"), "text before the first header is a comment area");
+        // a tiny ring-1 budget trims the block; the pool file itself is untouched.
+        let tight =
+            FileMemory::new("", &tape, 5).with_budget(TokenBudget { ring1: 10, ..FileMemory::default_budget() });
+        let a2 = tight.assemble(&base_step(), &Context::default()).await.unwrap();
+        assert!(a2.system.contains("[exemplars trimmed to budget]"));
+        assert!(std::fs::read_to_string(mem.exemplars_path()).unwrap().contains("old exemplar"), "the pool is never pruned");
+        let _ = std::fs::remove_file(mem.exemplars_path());
+        clean_ring4(&tape);
+    }
+
+    #[tokio::test]
+    async fn ring2_as_conversation_injects_real_messages() {
+        let tape = temp_tape("conv");
+        clean_ring4(&tape);
+        let mem = FileMemory::new("", &tape, 5).with_ring2_as_conversation();
+        mem.record(&trace("first question", "first answer")).await.unwrap();
+        mem.record(&trace("second question", "second answer")).await.unwrap();
+        let a = mem.assemble(&base_step(), &Context::default()).await.unwrap();
+        assert!(!a.system.contains("Recent context"), "no preamble block in conversation mode");
+        assert_eq!(a.conversation.len(), 4, "two turns -> two user/assistant message pairs");
+        assert!(matches!(a.conversation[0].role, Role::User));
+        assert!(matches!(a.conversation[1].role, Role::Assistant));
+        let Content::Text { text } = &a.conversation[3].content[0] else { panic!("text content") };
+        assert_eq!(text, "second answer");
+        // the default (no opt-in) still folds Ring-2 into the preamble - nothing regresses.
+        let plain = FileMemory::new("", &tape, 5);
+        let ap = plain.assemble(&base_step(), &Context::default()).await.unwrap();
+        assert!(ap.system.contains("Recent context") && ap.conversation.is_empty());
         clean_ring4(&tape);
     }
 

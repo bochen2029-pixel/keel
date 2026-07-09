@@ -128,22 +128,26 @@ impl Engine {
     /// accumulation) — the engine owns both. Honors `BLOCK` (I4 → `BudgetExceeded`); falls back DOWN
     /// the ladder when the routed tier is unplugged (local is always present).
     pub async fn run(&self, step: &mut Step, ctx: &mut Context, mut req: GenerateRequest) -> Result<Outcome> {
-        // (1) assemble — Ring-0 soul → system message. The seam only; full ring assembly is
-        //     `svc::memory` (Stage 2). A `None` memory (today) is a no-op.
+        // (1) assemble — the ringed context (canon §11): the system preamble (Ring-0 soul +
+        //     whatever the Memory folds into it), then any calibration exemplars (Ring-1) and the
+        //     working conversation (Ring-2) as REAL messages (A7.6), spliced before the live turn.
+        //     Both message lists are empty for memories that fold everything into the preamble
+        //     (the genome default). A `None` memory is a no-op.
         if let Some(mem) = &self.memory {
             let assembled = mem.assemble(step, ctx).await?;
+            let mut preamble: Vec<Message> = Vec::new();
             if !assembled.system.is_empty() {
-                req.messages.insert(
-                    0,
-                    Message {
-                        role: Role::System,
-                        content: vec![Content::Text { text: assembled.system }],
-                        name: None,
-                        reasoning_content: None,
-                        tool_call_id: None,
-                    },
-                );
+                preamble.push(Message {
+                    role: Role::System,
+                    content: vec![Content::Text { text: assembled.system }],
+                    name: None,
+                    reasoning_content: None,
+                    tool_call_id: None,
+                });
             }
+            preamble.extend(assembled.exemplars);
+            preamble.extend(assembled.conversation);
+            req.messages.splice(0..0, preamble);
         }
 
         // (2) route — the cheapest tier that clears the trust bar, or BLOCK (I4 / reversibility).
@@ -640,6 +644,55 @@ mod tests {
         assert_eq!(msgs.len(), 1);
         assert!(matches!(msgs[0].role, Role::System));
         assert!(matches!(&msgs[0].content[0], Content::Text { text } if text == "SOUL"));
+    }
+
+    #[tokio::test]
+    async fn memory_splices_exemplars_and_conversation_before_the_live_turn() {
+        // A7.6: Ring-1 exemplars + Ring-2 conversation ride the frozen `AssembledContext` fields as
+        // REAL messages — system first, then exemplars, then the working conversation, then the turn.
+        struct ConvMemory;
+        #[async_trait]
+        impl Memory for ConvMemory {
+            async fn assemble(&self, _s: &Step, _c: &Context) -> Result<AssembledContext> {
+                let msg = |role: Role, text: &str| Message {
+                    role,
+                    content: vec![Content::Text { text: text.into() }],
+                    name: None,
+                    reasoning_content: None,
+                    tool_call_id: None,
+                };
+                Ok(AssembledContext {
+                    system: "SOUL".into(),
+                    exemplars: vec![msg(Role::User, "EX-Q"), msg(Role::Assistant, "EX-A")],
+                    conversation: vec![msg(Role::User, "PREV-Q"), msg(Role::Assistant, "PREV-A")],
+                    ..Default::default()
+                })
+            }
+            async fn record(&self, _t: &Trace) -> Result<()> {
+                Ok(())
+            }
+            async fn consolidate(&self) -> Result<Step> {
+                Ok(step())
+            }
+        }
+        let echo = echo(0.0);
+        let seen = echo.seen.clone();
+        let engine = engine_with(
+            one_local(echo),
+            Box::new(FixedRouter("local")),
+            Arc::new(EvidenceOracle),
+            Arc::new(RecSpine::default()),
+            Some(Arc::new(ConvMemory)),
+            None,
+        );
+        engine.run(&mut step(), &mut ctx(), req()).await.unwrap();
+        let msgs = seen.lock().unwrap();
+        assert_eq!(msgs.len(), 5, "system + 2 exemplars + 2 conversation (no live user text in req())");
+        assert!(matches!(msgs[0].role, Role::System));
+        assert!(matches!(&msgs[1].content[0], Content::Text { text } if text == "EX-Q"));
+        assert!(matches!(&msgs[2].content[0], Content::Text { text } if text == "EX-A"));
+        assert!(matches!(&msgs[3].content[0], Content::Text { text } if text == "PREV-Q"));
+        assert!(matches!(&msgs[4].content[0], Content::Text { text } if text == "PREV-A"));
     }
 
     #[tokio::test]
