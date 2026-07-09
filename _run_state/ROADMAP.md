@@ -259,7 +259,12 @@ with common sense, never ask" directive, chose **mask-all-output** (state-hygien
   (only `qwen3-reranker-0.6b-q8_0.gguf` is there); discovered 2026-06-15 attempting the C1/C2 recall
   benchmark. The A3 embed organ + recall + fingerprint golden are built/tested, but no live embed /
   recall-uplift benchmark / Ring-4 live wiring can run until the operator downloads the embed model.
-  Unblocks: C1, C2, A3-live, Ring-4-live.
+  Unblocks: C1, C2, A3-live, Ring-4-live. **RESOLVED 2026-07-09 (operator-authorized):** downloaded
+  `qwen3-embedding-0.6b-q8_0.gguf` (official `Qwen/Qwen3-Embedding-0.6B-GGUF` Q8_0; 639,150,592 B,
+  byte-exact vs content-length) to `C:\models` + **smoke-tested LIVE** — llama-server `--embeddings
+  --pooling last` on :8090 (bounded, file-redirected, killed — the ISSUE-8 pattern) served
+  `/v1/embeddings` → a **1024-dim** vector, matching the keel.lock `dim: 1024` pin. C1/C2/A3-live/
+  Ring-4-live are now unblocked (each still needs its focused live session).
 - *(Append new issues as discovered, each: `ISSUE-N [type] — description · what unblocks it`. If the
   loop STALLS — only `[G]`/`[!]`/`[?]` slices remain and none can advance — write `.keelstate/STALLED`
   with the reason so the supervisor stops respawning, and the operator resolves the queue on next look.)*
