@@ -16,8 +16,8 @@
 
 use keel_adapters::{Anthropic, DeepSeek, LocalLlama};
 use keel_contracts::{
-    Context, Driver, GenerateRequest, GenerateResult, GoldenCase, KeelError, ModelTier, Oracle, Result, Router, Spine,
-    Step,
+    Content, Context, DataClass, Driver, GenerateRequest, GenerateResult, GoldenCase, KeelError, Kind, Memory,
+    ModelTier, Oracle, Result, Router, Spine, Step, Trust,
 };
 use keel_kernel::engine::{Engine as KernelEngine, EngineConfig, TierSlot};
 use keel_kernel::{Chain, Manifest, Registry, TierCfg};
@@ -105,6 +105,128 @@ pub fn build_memory(manifest: &Manifest, soul: &str, working_turns: Option<usize
         }
     }
     mem
+}
+
+/// One memory-consolidation turn (canon §11): route the self-interview prompt (sovereign → local),
+/// store BOTH registers — the rolling Ring-3 narrative + one appended episode (A7.2). Returns
+/// `(narrative_chars, episode_parsed)`; `(0, _)` = the model returned nothing, nothing stored.
+pub async fn run_consolidation_turn(
+    engine: &Engine,
+    mem: &keel_services::FileMemory,
+    ctx: &mut Context,
+) -> Result<(usize, bool)> {
+    let mut step = mem.consolidate().await?;
+    let req = keel_kernel::engine::request_from_step(&step);
+    let outcome = engine.run(&mut step, ctx, req).await?;
+    mem.store_consolidation(&outcome.result.content).await
+}
+
+/// One cold-eyes validation turn (I5 / canon §10.2): a fresh pass diffs the model-authored
+/// narrative against the lossless Tape. `Ok(None)` = no narrative to validate; `Ok(Some(text))` =
+/// the reviewer's verdict (`CONSISTENT` or the unsupported claims). Sovereign → local.
+pub async fn run_cold_eyes_turn(
+    engine: &Engine,
+    mem: &keel_services::FileMemory,
+    ctx: &mut Context,
+) -> Result<Option<String>> {
+    let Some(prompt) = mem.cold_eyes_prompt() else { return Ok(None) };
+    let mut step = Step {
+        kind: Kind::CoreWire,
+        ty: "memory:cold_eyes".into(),
+        trust_required: Trust::Normal,
+        data_class: DataClass::Sovereign, // validating personal memory stays on-box (I3)
+        tier_history: vec![],
+        oracle_failures: 0,
+        projected_cost: None,
+        critical: false,
+        source: Some("memory".into()),
+        content: vec![Content::Text { text: prompt }],
+        golden_refs: vec![],
+    };
+    let req = keel_kernel::engine::request_from_step(&step);
+    let outcome = engine.run(&mut step, ctx, req).await?;
+    Ok(Some(outcome.result.content.trim().to_string()))
+}
+
+/// A7.4 — the autopilot maintenance pass: run whatever the keel.lock policy says is due (at most
+/// one consolidation + one cold-eyes per pass — bounded, never a loop). **Zero flags, zero
+/// operator surface**: the CLI calls this at session end, the daemon per tick, serve after a
+/// response. Maintenance failures are reported on stderr and never fail the caller's turn.
+pub async fn run_maintenance(
+    engine: &Engine,
+    mem: &keel_services::FileMemory,
+    manifest: &Manifest,
+    ctx: &mut Context,
+    session_end: bool,
+) {
+    use keel_services::{MaintState, Maintenance, MaintenancePolicy, MaintenanceStats};
+    let mc = &manifest.memory;
+    let policy = MaintenancePolicy {
+        consolidate_every_turns: mc.consolidate_every_turns,
+        session_end_min_turns: mc.session_end_min_turns,
+        cold_eyes_every: mc.cold_eyes_every,
+    };
+    let state_path = mem.maint_state_path();
+    let mut state = MaintState::load(&state_path);
+    let base = ctx.trace_id.clone();
+    for _ in 0..2 {
+        let stats = MaintenanceStats {
+            turns_total: mem.tape_turns(),
+            last_consolidated_turns: state.last_consolidated_turns,
+            consolidations_since_cold_eyes: state.consolidations_since_cold_eyes,
+            ring2_over_budget: mem.ring2_over_budget(),
+            session_end,
+            has_narrative: mem.has_narrative(),
+        };
+        match policy.due(&stats) {
+            Some(Maintenance::Consolidate) => {
+                ctx.trace_id = format!("{base}-consolidate");
+                match run_consolidation_turn(engine, mem, ctx).await {
+                    Ok((n, parsed)) if n > 0 => {
+                        eprintln!(
+                            "[keel] memory: self-consolidated ({n}-char narrative{})",
+                            if parsed { ", episode appended" } else { ", episode stub" }
+                        );
+                        state.last_consolidated_turns = stats.turns_total;
+                        state.consolidations_since_cold_eyes += 1;
+                    }
+                    Ok(_) => {
+                        // an empty narrative stores nothing; still advance the cursor so an
+                        // uncooperative model can't wedge the trigger into firing every turn.
+                        state.last_consolidated_turns = stats.turns_total;
+                    }
+                    Err(e) => {
+                        eprintln!("[keel] memory: consolidation error: {e}");
+                        break;
+                    }
+                }
+            }
+            Some(Maintenance::ColdEyes) => {
+                ctx.trace_id = format!("{base}-cold-eyes");
+                match run_cold_eyes_turn(engine, mem, ctx).await {
+                    Ok(Some(verdict)) => {
+                        state.consolidations_since_cold_eyes = 0;
+                        // A7.5 extends this arm: parse the verdict, one bounded correction, I1 event.
+                        if verdict.to_uppercase().starts_with("CONSISTENT") {
+                            eprintln!("[keel] memory: cold-eyes CONSISTENT (narrative matches the Tape)");
+                        } else {
+                            eprintln!("[keel] memory: cold-eyes flagged drift:\n{verdict}");
+                        }
+                    }
+                    Ok(None) => state.consolidations_since_cold_eyes = 0,
+                    Err(e) => {
+                        eprintln!("[keel] memory: cold-eyes error: {e}");
+                        break;
+                    }
+                }
+            }
+            None => break,
+        }
+    }
+    ctx.trace_id = base;
+    if let Err(e) = state.save(&state_path) {
+        eprintln!("[keel] memory: maint-state save failed: {e}");
+    }
 }
 
 // ── the self-driving engine (L5 injection → L1 loop) ──────────────────────────

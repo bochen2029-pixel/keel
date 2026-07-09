@@ -334,6 +334,35 @@ impl FileMemory {
         std::fs::read_to_string(&self.episodes).map(|s| s.lines().filter(|l| !l.trim().is_empty()).count()).unwrap_or(0)
     }
 
+    // ── A7.4: the observable stats the maintenance policy decides over ──
+
+    /// Total turns on the Tape (the policy's progress axis; a garbled line still counts a line).
+    pub fn tape_turns(&self) -> usize {
+        std::fs::read_to_string(&self.tape).map(|s| s.lines().filter(|l| !l.trim().is_empty()).count()).unwrap_or(0)
+    }
+
+    /// Ring-2 context pressure: does the working window currently exceed its char budget? (One of
+    /// the A7.4 consolidation triggers — REEL §6.2 "context pressure".)
+    pub fn ring2_over_budget(&self) -> bool {
+        let Some(cap) = chars_cap(self.budget.ring2) else { return false };
+        let total: usize =
+            self.recent_traces(self.working_turns).iter().map(|t| Self::summarize(t).chars().count() + 1).sum();
+        total > cap
+    }
+
+    /// A narrative exists to validate (cold-eyes is meaningless before the first consolidation).
+    pub fn has_narrative(&self) -> bool {
+        self.narrative().is_some()
+    }
+
+    /// The autopilot's durable cursor sidecar (`<tape_stem>.maint.json`, A7.4).
+    pub fn maint_state_path(&self) -> PathBuf {
+        let stem = self.tape.file_stem().and_then(|s| s.to_str()).unwrap_or("tape");
+        let mut p = self.tape.clone();
+        p.set_file_name(format!("{stem}.maint.json"));
+        p
+    }
+
     /// Parse a consolidation turn's model output into `(narrative, episode-fields)` per the layout the
     /// prompt requests (`=== NARRATIVE === / === EPISODE ===` with `key: value` lines). Tolerant:
     /// missing markers → the whole output is the narrative and the episode is `None` (the caller

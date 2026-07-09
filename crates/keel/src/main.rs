@@ -10,8 +10,7 @@
 //!   keel --think "…"      keel --manifest C:\KEEL\keel.lock "hello"
 
 use keel_contracts::{
-    Content, Context, DataClass, Driver, Effort, GenerateRequest, GenerateResult, Kind, Memory, Message, Role, Step,
-    Trust,
+    Content, Context, DataClass, Driver, Effort, GenerateRequest, GenerateResult, Kind, Message, Role, Step, Trust,
 };
 use keel_kernel::{new_context, Manifest};
 use keel_services::{HeartbeatDriver, WatchDriver};
@@ -157,6 +156,10 @@ async fn run() -> keel_contracts::Result<()> {
         } else if !outcome.verdict.passed {
             eprintln!("[keel] !! verify FAILED - {}", outcome.verdict.failures.join("; "));
         }
+        // A7.4: a one-shot CLI turn IS a session boundary — run any due memory maintenance
+        // (consolidation / cold-eyes) per the keel.lock policy. Zero flags; never fails the turn.
+        let mem = keel::build_memory(&manifest, "", Some(12));
+        keel::run_maintenance(&engine, &mem, &manifest, &mut ctx, true).await;
     }
     Ok(())
 }
@@ -247,15 +250,21 @@ async fn run_daemon() -> keel_contracts::Result<()> {
             Ok(Some(outcome)) => {
                 ran += 1;
                 report_daemon(ran, &outcome, &ctx);
-                // canon §8/§11: a self that acts AND compresses — every N ticks, self-consolidate memory
-                // (a distinct trace_id so it checkpoints as its own run, not the tick's).
-                if consolidate_every > 0 && ran % consolidate_every == 0 {
-                    ctx.trace_id = format!("{base}-consolidate-{ran}");
-                    match do_consolidation(&engine, &mem, &mut ctx).await {
-                        Ok(n) if n > 0 => eprintln!("[keel] daemon: self-consolidated memory ({n}-char Ring-3 narrative)"),
-                        Ok(_) => {}
-                        Err(e) => eprintln!("[keel] daemon: consolidation error: {e}"),
+                // canon §8/§11: a self that acts AND compresses. A7.4: the autopilot policy drives
+                // maintenance by default; an explicit --consolidate-every N keeps the legacy fixed
+                // cadence as a manual override.
+                if consolidate_every > 0 {
+                    if ran % consolidate_every == 0 {
+                        ctx.trace_id = format!("{base}-consolidate-{ran}");
+                        match keel::run_consolidation_turn(&engine, &mem, &mut ctx).await {
+                            Ok((n, _)) if n > 0 => eprintln!("[keel] daemon: self-consolidated memory ({n}-char Ring-3 narrative)"),
+                            Ok(_) => {}
+                            Err(e) => eprintln!("[keel] daemon: consolidation error: {e}"),
+                        }
                     }
+                } else {
+                    ctx.trace_id = format!("{base}-maint-{ran}");
+                    keel::run_maintenance(&engine, &mem, &manifest, &mut ctx, false).await;
                 }
                 if !perpetual && ran >= max_ticks {
                     break;
@@ -320,28 +329,9 @@ fn run_distill_export() -> keel_contracts::Result<()> {
     Ok(())
 }
 
-/// One memory-consolidation turn (canon §11): build the self-interview prompt → route it (sovereign →
-/// local) so the model authors the Ring-3 narrative → store it via `set_narrative`. Returns the stored
-/// length (0 = empty, not stored). Shared by `keel consolidate` and the daemon's self-consolidation.
-async fn do_consolidation(
-    engine: &keel::Engine,
-    mem: &keel_services::FileMemory,
-    ctx: &mut Context,
-) -> keel_contracts::Result<usize> {
-    let mut step = mem.consolidate().await?;
-    let req = keel_kernel::engine::request_from_step(&step);
-    let outcome = engine.run(&mut step, ctx, req).await?;
-    // A7.2: one generation, two registers — the rolling Ring-3 narrative (overwritten) + one
-    // appended episode digest (durable). An unparsed layout stores a flagged deterministic stub.
-    let (n, parsed) = mem.store_consolidation(&outcome.result.content).await?;
-    if n > 0 && !parsed {
-        eprintln!("[keel] consolidate: episode layout unparsed - stored a deterministic fallback stub");
-    }
-    Ok(n)
-}
-
 /// `keel cold-eyes` — validate the model-authored Ring-3 narrative against the lossless Tape (canon
 /// §10.2 / I5): a fresh, uninvested pass flags claims the Tape doesn't support. Sovereign → local.
+/// (The A7.4 autopilot also runs this on its cadence; the command stays as the manual trigger.)
 async fn run_cold_eyes() -> keel_contracts::Result<()> {
     let mut manifest_path = "keel.lock".to_string();
     let mut args = std::env::args().skip(2);
@@ -353,37 +343,22 @@ async fn run_cold_eyes() -> keel_contracts::Result<()> {
     let manifest = Manifest::load(&manifest_path)?;
     let mut ctx = new_context(&manifest);
     let mem = keel::build_memory(&manifest, "", Some(12));
-    let Some(prompt) = mem.cold_eyes_prompt() else {
-        eprintln!("[keel] cold-eyes: no narrative to validate (run `keel consolidate` first)");
-        return Ok(());
-    };
-    let mut step = Step {
-        kind: Kind::CoreWire,
-        ty: "memory:cold_eyes".into(),
-        trust_required: Trust::Normal,
-        data_class: DataClass::Sovereign, // validating personal memory stays on-box
-        tier_history: vec![],
-        oracle_failures: 0,
-        projected_cost: None,
-        critical: false,
-        source: Some("memory".into()),
-        content: vec![Content::Text { text: prompt }],
-        golden_refs: vec![],
-    };
     let engine = keel::Engine::assemble(&manifest)?;
-    let req = keel_kernel::engine::request_from_step(&step);
-    let outcome = engine.run(&mut step, &mut ctx, req).await?;
-    let verdict = outcome.result.content.trim();
-    if verdict.to_uppercase().starts_with("CONSISTENT") {
-        eprintln!("[keel] cold-eyes: narrative CONSISTENT with the Tape (no drift detected)");
-    } else {
-        eprintln!("[keel] cold-eyes: UNSUPPORTED claim(s) - the narrative drifted from the Tape:\n{verdict}");
+    match keel::run_cold_eyes_turn(&engine, &mem, &mut ctx).await? {
+        None => eprintln!("[keel] cold-eyes: no narrative to validate (run `keel consolidate` first)"),
+        Some(verdict) if verdict.to_uppercase().starts_with("CONSISTENT") => {
+            eprintln!("[keel] cold-eyes: narrative CONSISTENT with the Tape (no drift detected)");
+        }
+        Some(verdict) => {
+            eprintln!("[keel] cold-eyes: UNSUPPORTED claim(s) - the narrative drifted from the Tape:\n{verdict}");
+        }
     }
     Ok(())
 }
 
-/// `keel consolidate` — close the perpetual-memory loop (canon §11): one [`do_consolidation`] turn, then
-/// report. The narrative is model-authored (lossy); the Tape stays the facts.
+/// `keel consolidate` — close the perpetual-memory loop (canon §11): one consolidation turn, then
+/// report. The narrative is model-authored (lossy); the Tape stays the facts. (The A7.4 autopilot
+/// also consolidates on its policy; the command stays as the manual trigger.)
 async fn run_consolidate() -> keel_contracts::Result<()> {
     let mut manifest_path = "keel.lock".to_string();
     let mut args = std::env::args().skip(2);
@@ -396,9 +371,14 @@ async fn run_consolidate() -> keel_contracts::Result<()> {
     let mut ctx = new_context(&manifest);
     let mem = keel::build_memory(&manifest, "", Some(12)); // a wider window for consolidation
     let engine = keel::Engine::assemble(&manifest)?;
-    match do_consolidation(&engine, &mem, &mut ctx).await? {
-        0 => eprintln!("[keel] consolidate: the model returned an empty narrative; not stored"),
-        n => eprintln!("[keel] consolidate: stored a {n}-char Ring-3 narrative (${:.4})", ctx.cost.total),
+    match keel::run_consolidation_turn(&engine, &mem, &mut ctx).await? {
+        (0, _) => eprintln!("[keel] consolidate: the model returned an empty narrative; not stored"),
+        (n, parsed) => {
+            if !parsed {
+                eprintln!("[keel] consolidate: episode layout unparsed - stored a deterministic fallback stub");
+            }
+            eprintln!("[keel] consolidate: stored a {n}-char Ring-3 narrative + episode (${:.4})", ctx.cost.total);
+        }
     }
     Ok(())
 }

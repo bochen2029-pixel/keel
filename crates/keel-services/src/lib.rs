@@ -15,6 +15,7 @@
 
 pub mod distill;
 pub mod driver;
+pub mod maintenance;
 pub mod memory;
 pub mod perception;
 pub mod recall;
@@ -24,6 +25,7 @@ pub mod verifier;
 
 pub use distill::{export_training_jsonl, training_pair};
 pub use driver::{HeartbeatDriver, UserTurnDriver, WatchDriver};
+pub use maintenance::{MaintState, Maintenance, MaintenancePolicy, MaintenanceStats};
 pub use memory::{Episode, FileMemory};
 pub use perception::{ChangeGate, FrameGate};
 pub use recall::{cosine, recall_top_k, should_rebuild, Fingerprint};

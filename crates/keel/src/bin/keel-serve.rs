@@ -20,6 +20,8 @@ const ADDR: &str = "127.0.0.1:7070";
 struct AppState {
     engine: Arc<Engine>,
     manifest: Arc<Manifest>,
+    /// A7.4: at most one background maintenance pass at a time (a compare-exchange gate).
+    maintenance_busy: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[tokio::main]
@@ -30,7 +32,11 @@ async fn main() {
     let engine = Engine::assemble(&manifest).unwrap_or_else(|e| fail(format!("assemble: {e}")));
     eprintln!("[keel-serve] tiers={:?}", engine.available());
 
-    let state = AppState { engine: Arc::new(engine), manifest: Arc::new(manifest) };
+    let state = AppState {
+        engine: Arc::new(engine),
+        manifest: Arc::new(manifest),
+        maintenance_busy: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
     let app = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/v1/models", get(models))
@@ -142,7 +148,22 @@ async fn chat(State(st): State<AppState>, Json(body): Json<ChatRequest>) -> impl
 
     let mut ctx = new_context(&st.manifest);
     match st.engine.run(&mut step, &mut ctx, req).await {
-        Ok(outcome) => Json(openai_response(&outcome, &ctx.trace_id)).into_response(),
+        Ok(outcome) => {
+            // A7.4: fire any due memory maintenance in the BACKGROUND (response latency stays
+            // clean); the compare-exchange gate keeps passes serialized, and a pass is bounded
+            // (at most one consolidation + one cold-eyes).
+            use std::sync::atomic::Ordering;
+            if st.maintenance_busy.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+                let st2 = st.clone();
+                tokio::spawn(async move {
+                    let mem = keel::build_memory(&st2.manifest, "", Some(12));
+                    let mut mctx = new_context(&st2.manifest);
+                    keel::run_maintenance(&st2.engine, &mem, &st2.manifest, &mut mctx, false).await;
+                    st2.maintenance_busy.store(false, Ordering::SeqCst);
+                });
+            }
+            Json(openai_response(&outcome, &ctx.trace_id)).into_response()
+        }
         Err(e) => {
             let code = if e.code() == "BUDGET_EXCEEDED" { StatusCode::PAYMENT_REQUIRED } else { StatusCode::BAD_GATEWAY };
             (code, Json(json!({ "error": { "message": e.to_string(), "code": e.code() } }))).into_response()
