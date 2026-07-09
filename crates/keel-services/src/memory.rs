@@ -37,10 +37,28 @@
 use crate::recall::{cosine, Embed, Fingerprint};
 use async_trait::async_trait;
 use keel_contracts::{
-    AssembledContext, Content, Context, DataClass, KeelError, Kind, Memory, Result, Step, Trace, Trust,
+    AssembledContext, Content, Context, DataClass, KeelError, Kind, Memory, Result, Step, TokenBudget, Trace, Trust,
 };
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+/// Chars-per-token proxy for the ring budgets (A7.1): budgets are declared in **tokens** (the frozen
+/// `TokenBudget`), enforced in **chars** at ~4 chars/token — no tokenizer dep (the proposal's
+/// falsifier: if lived runs overflow the window despite the caps, add a real tokenizer).
+const CHARS_PER_TOKEN: usize = 4;
+
+/// A ring's char cap from its token budget; `0` tokens = **uncapped** (the explicit opt-out).
+fn chars_cap(tokens: u32) -> Option<usize> {
+    (tokens > 0).then_some(tokens as usize * CHARS_PER_TOKEN)
+}
+
+/// Truncate to at most `max` chars on a char boundary (UTF-8-safe; the budgets count chars, not bytes).
+fn take_chars(s: &str, max: usize) -> &str {
+    match s.char_indices().nth(max) {
+        Some((byte_idx, _)) => &s[..byte_idx],
+        None => s,
+    }
+}
 
 /// A file-backed [`Memory`] over the append-only **Tape** (canon §11). The Tape is the lossless
 /// system of record; the SQLite index (the `Spine`) is the derived, rebuildable checkpoint.
@@ -63,6 +81,10 @@ pub struct FileMemory {
     vecs: PathBuf,
     /// How many semantically-relevant earlier turns Ring-4 injects (0 = off).
     recall_k: usize,
+    /// A7.1 — the per-ring context budget (canon §7 "ringed + budgeted"; REEL §4.7). Declared in
+    /// tokens (the frozen `TokenBudget`), enforced in chars (~4/token). Ring-0 is **never** trimmed
+    /// (identity protection, REEL §3.4) — its field is informational. `0` on a ring = uncapped.
+    budget: TokenBudget,
     /// Serializes appends within a process (the Tape is also crash-safe per JSONL line).
     lock: Mutex<()>,
 }
@@ -75,7 +97,32 @@ impl FileMemory {
         let tape = tape.into();
         let narrative = narrative_path_for(&tape);
         let vecs = vec_path_for(&tape);
-        Self { soul: soul.into(), tape, narrative, working_turns, embedder: None, vecs, recall_k: 0, lock: Mutex::new(()) }
+        Self {
+            soul: soul.into(),
+            tape,
+            narrative,
+            working_turns,
+            embedder: None,
+            vecs,
+            recall_k: 0,
+            budget: Self::default_budget(),
+            lock: Mutex::new(()),
+        }
+    }
+
+    /// The genome-default ring budget (A7.1): conservative caps that keep `assemble` O(1) regardless
+    /// of Tape size. Ring-0 = 0 (never trimmed — identity protection); ring-1 exemplars 1000 tok ·
+    /// ring-2 working 2000 · ring-3 narrative 1000 · ring-4 recall 1000. A cell (or keel.lock
+    /// `memory.budget`) overrides via [`with_budget`](FileMemory::with_budget).
+    pub fn default_budget() -> TokenBudget {
+        TokenBudget { ring1: 1000, ring2: 2000, ring3: 1000, ring4: 1000, ..Default::default() }
+    }
+
+    /// Override the per-ring context budget (tokens; `0` = uncapped). Ring-0 is never trimmed
+    /// regardless — the soul loads verbatim (REEL §3.4: identity is constitutional).
+    pub fn with_budget(mut self, budget: TokenBudget) -> Self {
+        self.budget = budget;
+        self
     }
 
     /// Wire **Ring-4 semantic recall** (canon §11): an embed organ + how many relevant earlier turns to
@@ -160,6 +207,11 @@ impl FileMemory {
              Exact facts of record live in the Tape - capture intent + arc, do not restate facts as if \
              you are their source (you may be wrong; the Tape is not).\n",
         );
+        // A7.1: budget-aware generation — the narrative is loaded under a fixed ring budget, so ask
+        // the model to write within it (assembly hard-trims regardless; this keeps the trim rare).
+        if let Some(c) = chars_cap(self.budget.ring3) {
+            p.push_str(&format!("Keep the narrative under about {c} characters - it is loaded within a fixed budget.\n"));
+        }
         if let Some(prior) = self.narrative() {
             p.push_str("\nPrior narrative:\n");
             p.push_str(&prior);
@@ -251,18 +303,50 @@ impl Memory for FileMemory {
     /// the engine prepends. Empty when there is no soul and no history (a fresh first turn) — the
     /// engine then prepends nothing.
     async fn assemble(&self, step: &Step, _ctx: &Context) -> Result<AssembledContext> {
-        let mut system = self.soul.clone(); // Ring-0 (soul / persona — empty for the bare genome)
-        // Ring-3: the model-authored narrative arc (lossy; facts of record stay in the Tape, I5).
+        let mut system = self.soul.clone(); // Ring-0 (soul / persona) — NEVER trimmed (REEL §3.4)
+        // Ring-3: the model-authored narrative arc (lossy; facts of record stay in the Tape, I5),
+        // hard-trimmed to its budget (A7.1) — head kept (the durable arc leads), marker on a cut.
         if let Some(narrative) = self.narrative() {
+            let shown = match chars_cap(self.budget.ring3) {
+                Some(c) if narrative.chars().count() > c => {
+                    format!("{}\n...[narrative trimmed to budget]", take_chars(&narrative, c))
+                }
+                _ => narrative,
+            };
             if !system.is_empty() {
                 system.push_str("\n\n");
             }
             system.push_str("Narrative so far (your compressed memory; facts of record live in the Tape):\n");
-            system.push_str(&narrative);
+            system.push_str(&shown);
         }
+        // Ring-2 selection (A7.1): newest-first accumulation under the ring-2 char budget (then back
+        // to chronological order). The newest turn always survives — trimmed to the cap if it alone
+        // exceeds it — so working memory never goes fully blind under pressure.
         let recent = self.recent_traces(self.working_turns);
+        let ring2: Vec<String> = {
+            let cap = chars_cap(self.budget.ring2);
+            let mut chosen: Vec<String> = Vec::new();
+            let mut used = 0usize;
+            for t in recent.iter().rev() {
+                let entry = Self::summarize(t);
+                let len = entry.chars().count() + 1;
+                match cap {
+                    Some(c) if chosen.is_empty() && len > c => {
+                        chosen.push(format!("{}...", take_chars(&entry, c.saturating_sub(3))));
+                        break;
+                    }
+                    Some(c) if used + len > c => break,
+                    _ => {}
+                }
+                used += len;
+                chosen.push(entry);
+            }
+            chosen.reverse();
+            chosen
+        };
         // Ring-4: semantically-relevant EARLIER turns (canon §11) — embed the current query, cosine-rank
-        // the vector sidecar, inject the top-k (excluding those already in Ring-2). Opt-in (needs an embedder).
+        // the vector sidecar, inject the top-k under the ring-4 budget (excluding what Ring-2 already
+        // carries). Opt-in (needs an embedder).
         if self.recall_k > 0 {
             if let Some(embedder) = &self.embedder {
                 if let Some(query) = step.content.iter().find_map(|c| match c {
@@ -270,7 +354,7 @@ impl Memory for FileMemory {
                     _ => None,
                 }) {
                     if let Ok(qv) = embedder.embed_text(query).await {
-                        let recent_set: std::collections::HashSet<String> = recent.iter().map(Self::summarize).collect();
+                        let recent_set: std::collections::HashSet<&String> = ring2.iter().collect();
                         let mut scored: Vec<(f32, String)> = self
                             .read_vecs()
                             .into_iter()
@@ -278,7 +362,22 @@ impl Memory for FileMemory {
                             .map(|(t, v)| (cosine(&qv, &v), t))
                             .collect();
                         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-                        let picks: Vec<String> = scored.into_iter().take(self.recall_k).map(|(_, t)| t).collect();
+                        let cap = chars_cap(self.budget.ring4);
+                        let mut used = 0usize;
+                        let mut picks: Vec<String> = Vec::new();
+                        for (_, t) in scored.into_iter() {
+                            if picks.len() >= self.recall_k {
+                                break;
+                            }
+                            let len = t.chars().count() + 1;
+                            if let Some(c) = cap {
+                                if used + len > c {
+                                    break;
+                                }
+                            }
+                            used += len;
+                            picks.push(t);
+                        }
                         if !picks.is_empty() {
                             if !system.is_empty() {
                                 system.push_str("\n\n");
@@ -293,18 +392,18 @@ impl Memory for FileMemory {
                 }
             }
         }
-        // Ring-2: the recent working turns, read back from the Tape (chronological).
-        if !recent.is_empty() {
+        // Ring-2: the recent working turns, read back from the Tape (chronological, budget-selected).
+        if !ring2.is_empty() {
             if !system.is_empty() {
                 system.push_str("\n\n");
             }
             system.push_str("Recent context (oldest first):");
-            for t in &recent {
+            for e in &ring2 {
                 system.push('\n');
-                system.push_str(&Self::summarize(t));
+                system.push_str(e);
             }
         }
-        Ok(AssembledContext { system, ..Default::default() })
+        Ok(AssembledContext { system, budget: self.budget.clone(), ..Default::default() })
     }
 
     /// Append the full `Trace` to the Tape as one JSONL line — the lossless factual register (§11).
@@ -588,5 +687,95 @@ mod tests {
         let _m2 = FileMemory::new("", &tape, 0).with_embedder(Arc::new(StubEmbed), Fingerprint::new("embB", 3), 1);
         assert!(!vec_path_for(&tape).exists(), "mismatched fingerprint clears the stale sidecar (GOLDEN_RECALL)");
         clean_ring4(&tape);
+    }
+
+    // ── A7.1: budgeted assembly (canon §7 "ringed + budgeted"; REEL §4.7) ──
+
+    /// A budget in tokens whose ring-2 cap admits roughly `chars` characters.
+    fn budget(ring2_chars: usize, ring3_chars: usize, ring4_chars: usize) -> TokenBudget {
+        TokenBudget {
+            ring2: (ring2_chars / CHARS_PER_TOKEN) as u32,
+            ring3: (ring3_chars / CHARS_PER_TOKEN) as u32,
+            ring4: (ring4_chars / CHARS_PER_TOKEN) as u32,
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn budget_caps_ring2_and_the_newest_turn_survives() {
+        let tape = temp_tape("budget-r2");
+        clean_ring4(&tape);
+        // 8 turns of ~60 chars each under a ~160-char ring-2 cap → only the newest ~2 fit.
+        let mem = FileMemory::new("", &tape, 20).with_budget(budget(160, 4000, 4000));
+        for i in 1..=8 {
+            mem.record(&trace(&format!("question number {i} padded {}", "x".repeat(20)), &format!("answer-{i}"))).await.unwrap();
+        }
+        let a = mem.assemble(&base_step(), &Context::default()).await.unwrap();
+        assert!(a.system.contains("answer-8"), "the newest turn always survives the budget");
+        assert!(!a.system.contains("answer-1"), "the oldest turn is dropped under budget pressure");
+        assert!(a.system.chars().count() < 400, "the assembled context is bounded (O(1) per turn)");
+        // budget is reported on the frozen AssembledContext for the engine/caller.
+        assert_eq!(a.budget.ring2, (160 / CHARS_PER_TOKEN) as u32);
+        // an oversized single newest turn is itself trimmed, never dropped (memory never goes blind).
+        mem.record(&trace(&"y".repeat(2000), "needle-answer")).await.unwrap();
+        let a2 = mem.assemble(&base_step(), &Context::default()).await.unwrap();
+        assert!(a2.system.contains("..."), "the lone oversized newest turn is trimmed to the cap");
+        clean_ring4(&tape);
+    }
+
+    #[tokio::test]
+    async fn narrative_is_trimmed_to_its_ring3_budget_head_first() {
+        let tape = temp_tape("budget-r3");
+        clean_ring4(&tape);
+        let mem = FileMemory::new("", &tape, 5).with_budget(budget(4000, 100, 4000));
+        let long = format!("HEAD-OF-ARC {} TAIL-END", "z".repeat(500));
+        mem.set_narrative(&long).unwrap();
+        let a = mem.assemble(&base_step(), &Context::default()).await.unwrap();
+        assert!(a.system.contains("HEAD-OF-ARC"), "the head (durable arc) is kept");
+        assert!(!a.system.contains("TAIL-END"), "the tail beyond the budget is cut");
+        assert!(a.system.contains("[narrative trimmed to budget]"), "the cut is marked, never silent");
+        clean_ring4(&tape);
+    }
+
+    #[tokio::test]
+    async fn ring0_soul_is_never_trimmed_regardless_of_budget() {
+        let tape = temp_tape("budget-r0");
+        clean_ring4(&tape);
+        let soul = format!("SOUL-START {} SOUL-END", "s".repeat(1200));
+        // every capped ring squeezed to ~40 chars — the soul must still load verbatim (REEL §3.4).
+        let mem = FileMemory::new(&soul, &tape, 5).with_budget(budget(40, 40, 40));
+        mem.record(&trace("q", "a")).await.unwrap();
+        let a = mem.assemble(&base_step(), &Context::default()).await.unwrap();
+        assert!(a.system.starts_with("SOUL-START"), "Ring-0 leads");
+        assert!(a.system.contains("SOUL-END"), "Ring-0 is loaded verbatim - identity is constitutional");
+        clean_ring4(&tape);
+    }
+
+    #[tokio::test]
+    async fn ring4_recall_respects_its_budget() {
+        let tape = temp_tape("budget-r4");
+        clean_ring4(&tape);
+        // k = 5 but a tiny ring-4 char budget → at most one (short) recall entry is injected.
+        let mem = FileMemory::new("", &tape, 0)
+            .with_embedder(Arc::new(StubEmbed), Fingerprint::new("stub", 3), 5)
+            .with_budget(budget(4000, 4000, 80));
+        mem.record(&trace("France facts one", "Paris one")).await.unwrap();
+        mem.record(&trace("France facts two", "Paris two")).await.unwrap();
+        mem.record(&trace("France facts three", "Paris three")).await.unwrap();
+        let mut q = base_step();
+        q.content = vec![Content::Text { text: "a France question".into() }];
+        let a = mem.assemble(&q, &Context::default()).await.unwrap();
+        let injected = a.system.matches("Paris").count();
+        assert!(injected >= 1, "recall still surfaces the best match");
+        assert!(injected < 3, "the ring-4 budget bounds how many recalls inject (k alone would allow 3)");
+        clean_ring4(&tape);
+    }
+
+    #[test]
+    fn take_chars_is_utf8_safe_and_zero_budget_means_uncapped() {
+        assert_eq!(take_chars("héllo wörld", 5), "héllo"); // char boundaries, not bytes
+        assert_eq!(take_chars("ab", 10), "ab");
+        assert_eq!(chars_cap(0), None, "0 tokens = uncapped (the explicit opt-out)");
+        assert_eq!(chars_cap(10), Some(40), "~4 chars per token");
     }
 }
