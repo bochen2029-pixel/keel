@@ -22,7 +22,7 @@ use keel_contracts::{
 use keel_kernel::engine::{Engine as KernelEngine, EngineConfig, TierSlot};
 use keel_kernel::{Chain, Manifest, Registry, TierCfg};
 use keel_middleware::{AuditMiddleware, AuditSink, CostMiddleware, FileAuditSink, PrivacyMiddleware, Redactor};
-use keel_services::{DifficultyRouter, FileMemory, FileTraceSink, GoldenDispatchOracle, Verifier};
+use keel_services::{DifficultyRouter, FileTraceSink, GoldenDispatchOracle, Verifier};
 use keel_store::SqliteStore;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -47,6 +47,65 @@ pub const GOLDEN_PATH: &str = "tests/golden/golden.json";
 // llama-server launch paths are keel.lock-driven (servers.llama_cpp + substrate.llm_vision, via the
 // Manifest helpers); only the KEEL-owned log path stays a const here.
 pub const LLAMA_LOG: &str = ".keelstate/llama-server.log";
+/// The embed organ's own llama-server log (A7.3 — a separate process; the LLM owns `LLAMA_LOG`).
+pub const EMBED_LOG: &str = ".keelstate/embed-server.log";
+
+// ── the memory autopilot wiring (A7.3) ────────────────────────────────────────
+
+/// Resolve the embed substrate (canon §11/§13, the `embedded_tiny` resolver rung): probe the
+/// configured embed port for a *ready* server, else cold-start one from `keel.lock` (its own
+/// llama-server — `--embeddings --pooling last`; the ISSUE-8 handle discipline via a file log).
+/// **Graceful:** any failure returns `None` — memory degrades to Ring-0/2/3 with one stderr note;
+/// a turn is never blocked on the embedder.
+fn resolve_embedder(manifest: &Manifest) -> Option<(Arc<keel_adapters::Embedder>, keel_services::Fingerprint)> {
+    let e = &manifest.substrate.embedding;
+    if e.file.is_empty() || e.id.is_empty() {
+        return None; // unconfigured — recall silently off (the genome's no-substrate default)
+    }
+    let endpoint = format!("http://127.0.0.1:{}", e.port);
+    if !keel_kernel::health_ok("127.0.0.1", e.port, std::time::Duration::from_millis(400)) {
+        let (Some(exe), Some(model)) = (manifest.llama_exe(), manifest.embed_model_path()) else {
+            eprintln!("[keel] ring-4 recall off: substrate.embedding.file set but servers.llama_cpp/models_dir incomplete");
+            return None;
+        };
+        let mut cfg = keel_kernel::LlamaServerConfig::new(exe, model);
+        cfg.port = e.port;
+        cfg.embedding = true;
+        cfg.pooling = Some("last".into());
+        cfg.ctx_size = 4096; // an embedder needs no chat-sized context
+        cfg.log_path = Some(EMBED_LOG.to_string());
+        cfg.startup_timeout_secs = 60;
+        eprintln!("[keel] no embed server up - cold-starting llama-server (embeddings) on :{}...", e.port);
+        match keel_kernel::launch(&cfg) {
+            Ok(s) => eprintln!("[keel] embed server ready -> {} (pid {})", s.endpoint(), s.pid()),
+            Err(err) => {
+                eprintln!("[keel] ring-4 recall off (embed server: {err})");
+                return None;
+            }
+        } // handle drops here; the process keeps running (detached for reuse, like the LLM server)
+    }
+    Some((
+        Arc::new(keel_adapters::Embedder::new(endpoint, e.id.clone())),
+        keel_services::Fingerprint::new(e.id.clone(), e.dim),
+    ))
+}
+
+/// Build the genome's Tape-backed memory per keel.lock `memory` (A7): ring budgets applied (A7.1),
+/// Ring-4 recall **on by default** — wired when `memory.recall` is true AND the embed substrate
+/// resolves, else gracefully Ring-0/2/3 only (A7.3). Every L5 consumer (engine, daemon, consolidate,
+/// cold-eyes) builds memory HERE, so the autopilot defaults hold everywhere.
+pub fn build_memory(manifest: &Manifest, soul: &str, working_turns: Option<usize>) -> keel_services::FileMemory {
+    let mc = &manifest.memory;
+    let mut mem = keel_services::FileMemory::new(soul, TAPE_PATH, working_turns.unwrap_or(mc.working_turns))
+        .with_budget(mc.budget.to_budget())
+        .with_recall_tuning(mc.recall_window, mc.backfill);
+    if mc.recall {
+        if let Some((emb, fp)) = resolve_embedder(manifest) {
+            mem = mem.with_embedder(emb, fp, mc.recall_k);
+        }
+    }
+    mem
+}
 
 // ── the self-driving engine (L5 injection → L1 loop) ──────────────────────────
 
@@ -109,11 +168,11 @@ impl Engine {
         // (read-only, best-effort from golden.json; a cell injects its own). Empty if the file is
         // absent — a plain chat turn carries no refs, so the fail-closed guard only bites a ref'd step.
         let goldens = load_goldens(GOLDEN_PATH);
-        // Memory: the Tape-backed `FileMemory` (canon §11) — the lossless factual register. `assemble`
-        // injects Ring-0 (empty genome soul; persona is a cell concern) + Ring-2 recent turns read
-        // back from the Tape, so working memory persists ACROSS `keel` invocations; the engine appends
-        // each Trace to the Tape post-checkpoint. The `TraceSink` flywheel feed is wired just below.
-        let memory: Option<Arc<dyn keel_contracts::Memory>> = Some(Arc::new(FileMemory::new("", TAPE_PATH, 6)));
+        // Memory: the Tape-backed `FileMemory` (canon §11) — the lossless factual register, built via
+        // the A7 autopilot wiring: ring budgets enforced (A7.1) + Ring-4 semantic recall ON when the
+        // embed substrate resolves (A7.3; graceful degrade otherwise). Ring-0 stays the empty genome
+        // soul (persona is a cell concern); the engine appends each Trace to the Tape post-checkpoint.
+        let memory: Option<Arc<dyn keel_contracts::Memory>> = Some(Arc::new(build_memory(manifest, "", None)));
         // The flywheel feed (canon §8 step 9): a passed verdict → an append-only distill corpus, with
         // secrets SCRUBBED first (reversibility gate §5) via the SAME `redactor` as the I3 egress mask —
         // one definition of "secret", so the corpus never carries what egress would have masked.

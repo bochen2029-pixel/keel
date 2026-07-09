@@ -19,7 +19,7 @@ pub use chain::Chain;
 pub use context::{new_context, new_trace_id, now_millis};
 pub use engine::{Engine, Outcome, TierSlot};
 pub use lifecycle::{
-    default_local_candidates, launch, probe, resolve_endpoint, LlamaServer, LlamaServerConfig,
+    default_local_candidates, health_ok, launch, probe, resolve_endpoint, LlamaServer, LlamaServerConfig,
 };
-pub use manifest::{CostCfg, Manifest, PriceCfg, RouterCfg, TierCfg};
+pub use manifest::{CostCfg, EmbeddingCfg, Manifest, MemoryCfg, PriceCfg, RouterCfg, TierCfg};
 pub use registry::Registry;

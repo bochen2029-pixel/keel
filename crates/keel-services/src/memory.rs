@@ -118,6 +118,16 @@ pub struct FileMemory {
     /// The A7.2 episodes register (`<tape_stem>.episodes.jsonl`): append-only five-field digests, one
     /// per consolidation — the durable mid-resolution layer (never overwritten, never re-compressed).
     episodes: PathBuf,
+    /// The episode vector sidecar (`<tape_stem>.epvec.jsonl`, A7.3): the coarse tier of the two-tier
+    /// Ring-4 index. Episodes stay few, so this tier always scans whole.
+    epvecs: PathBuf,
+    /// The bounded recent-turn vector-scan window (A7.3): only the newest N turn vectors are scanned
+    /// per recall, so brute-force stays O(window + episodes) regardless of Tape size (ISSUE-1 kept;
+    /// the latency falsifier re-opens `sqlite-vec`). Older detail stays reachable via episodes.
+    recall_window: usize,
+    /// Cold-start backfill (A7.3): when the turn sidecar is absent but the Tape has turns, embed the
+    /// last N summaries once, lazily, on the next assemble (bounded — never O(Tape)).
+    backfill: usize,
     /// How many semantically-relevant earlier turns Ring-4 injects (0 = off).
     recall_k: usize,
     /// A7.1 — the per-ring context budget (canon §7 "ringed + budgeted"; REEL §4.7). Declared in
@@ -137,6 +147,7 @@ impl FileMemory {
         let narrative = narrative_path_for(&tape);
         let vecs = vec_path_for(&tape);
         let episodes = episodes_path_for(&tape);
+        let epvecs = epvec_path_for(&tape);
         Self {
             soul: soul.into(),
             tape,
@@ -145,10 +156,21 @@ impl FileMemory {
             embedder: None,
             vecs,
             episodes,
+            epvecs,
+            recall_window: 4096,
+            backfill: 32,
             recall_k: 0,
             budget: Self::default_budget(),
             lock: Mutex::new(()),
         }
+    }
+
+    /// Tune the Ring-4 scan bound + cold-start backfill (A7.3; keel.lock `memory.recall_window` /
+    /// `memory.backfill`). `recall_window` bounds the turn-vector scan; episodes always scan whole.
+    pub fn with_recall_tuning(mut self, recall_window: usize, backfill: usize) -> Self {
+        self.recall_window = recall_window;
+        self.backfill = backfill;
+        self
     }
 
     /// The genome-default ring budget (A7.1): conservative caps that keep `assemble` O(1) regardless
@@ -171,12 +193,14 @@ impl FileMemory {
     /// is cleared (never serve a mismatched index — `GOLDEN_RECALL`), to be rebuilt from the Tape as new
     /// turns are recorded. Recall is opt-in: without this, memory is Ring-0/2/3 only (no embed dependency).
     pub fn with_embedder(mut self, embedder: Arc<dyn Embed>, fp: Fingerprint, recall_k: usize) -> Self {
-        // fingerprint guard: a sidecar from a different embedder is meaningless → clear it (don't serve stale).
+        // fingerprint guard: a sidecar from a different embedder is meaningless → clear BOTH tiers
+        // (turn + episode vectors — don't serve stale; rebuild-from-ledger, GOLDEN_RECALL).
         let fp_file = self.vecs.with_extension("fp");
         let prev = std::fs::read_to_string(&fp_file).ok().map(|s| s.trim().to_string());
         let now = format!("{}:{}", fp.embedder, fp.dim);
         if prev.as_deref() != Some(now.as_str()) {
             let _ = std::fs::remove_file(&self.vecs); // rebuild-from-ledger as turns re-accumulate
+            let _ = std::fs::remove_file(&self.epvecs); // episodes re-embed on backfill
             if let Some(d) = fp_file.parent() {
                 let _ = std::fs::create_dir_all(d);
             }
@@ -187,24 +211,32 @@ impl FileMemory {
         self
     }
 
-    /// Append a `{text, vec}` line to the Ring-4 sidecar (best-effort; recall is non-critical, so a
+    /// Append a `{text, vec}` line to a vector sidecar (best-effort; recall is non-critical, so a
     /// sidecar write never fails a turn — the lossless Tape is the system of record).
-    fn append_vec(&self, text: &str, vec: &[f32]) {
+    fn append_vec_line(&self, path: &Path, text: &str, vec: &[f32]) {
         let line = serde_json::json!({ "text": text, "vec": vec }).to_string();
         let _g = self.lock.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(dir) = self.vecs.parent() {
+        if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&self.vecs) {
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
             use std::io::Write;
             let _ = writeln!(f, "{line}");
         }
     }
 
-    /// Read the Ring-4 sidecar as `(text, vec)` pairs (best-effort; a missing/garbled line is skipped).
-    fn read_vecs(&self) -> Vec<(String, Vec<f32>)> {
-        let Ok(raw) = std::fs::read_to_string(&self.vecs) else { return Vec::new() };
+    /// Append a turn embedding to the fine tier.
+    fn append_vec(&self, text: &str, vec: &[f32]) {
+        self.append_vec_line(&self.vecs.clone(), text, vec);
+    }
+
+    /// Read the newest `tail` `(text, vec)` pairs from a vector sidecar (`usize::MAX` = whole file;
+    /// best-effort; a missing/garbled line is skipped). Order is irrelevant to cosine ranking.
+    fn read_vec_lines(&self, path: &Path, tail: usize) -> Vec<(String, Vec<f32>)> {
+        let Ok(raw) = std::fs::read_to_string(path) else { return Vec::new() };
         raw.lines()
+            .rev()
+            .take(tail)
             .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
             .filter_map(|v| {
                 let text = v["text"].as_str()?.to_string();
@@ -212,6 +244,38 @@ impl FileMemory {
                 Some((text, vec))
             })
             .collect()
+    }
+
+    /// The two-tier Ring-4 scan set (A7.3): ALL episode vectors (coarse, few) + the newest
+    /// `recall_window` turn vectors (fine, bounded) — O(window + episodes) regardless of Tape size.
+    fn recall_candidates(&self) -> Vec<(String, Vec<f32>)> {
+        let mut all = self.read_vec_lines(&self.epvecs.clone(), usize::MAX);
+        all.extend(self.read_vec_lines(&self.vecs.clone(), self.recall_window));
+        all
+    }
+
+    /// Cold-start backfill (A7.3): if a tier's sidecar is absent but its source register has content,
+    /// embed a bounded slice once (turns: the newest `backfill`; episodes: all — they stay few).
+    /// Lazy + idempotent-by-existence; an embed failure just retries on a later assemble.
+    async fn backfill_vectors(&self) {
+        let Some(embedder) = &self.embedder else { return };
+        if !self.vecs.exists() {
+            let seed = self.recent_traces(self.backfill);
+            for t in &seed {
+                let s = Self::summarize(t);
+                if let Ok(v) = embedder.embed_text(&s).await {
+                    self.append_vec(&s, &v);
+                }
+            }
+        }
+        if !self.epvecs.exists() {
+            for ep in self.read_episodes(usize::MAX) {
+                let s = ep.text();
+                if let Ok(v) = embedder.embed_text(&s).await {
+                    self.append_vec_line(&self.epvecs.clone(), &s, &v);
+                }
+            }
+        }
     }
 
     /// The Ring-3 narrative register (the model-authored compressed arc), trimmed; `None` when absent or
@@ -363,10 +427,15 @@ impl FileMemory {
         Ok((narrative.chars().count(), parsed))
     }
 
-    /// Embed an episode into the Ring-4 episode index (best-effort; wired in A7.3 — a no-op without
-    /// an embedder, and an embed failure never fails the consolidation).
-    async fn embed_episode(&self, _ep: &Episode) {
-        // A7.3 fills this in (the two-tier index); a stub keeps A7.2 model-free and layer-complete.
+    /// Embed an episode into the coarse Ring-4 tier (best-effort — a no-op without an embedder, and
+    /// an embed failure never fails the consolidation; the episode register itself is already durable).
+    async fn embed_episode(&self, ep: &Episode) {
+        if let Some(embedder) = &self.embedder {
+            let s = ep.text();
+            if let Ok(v) = embedder.embed_text(&s).await {
+                self.append_vec_line(&self.epvecs.clone(), &s, &v);
+            }
+        }
     }
 
     /// Build the consolidation prompt (canon §11 / the perpetual-memory proposal): a **self-interview /
@@ -503,6 +572,15 @@ fn episodes_path_for(tape: &Path) -> PathBuf {
     p
 }
 
+/// The coarse Ring-4 tier path (A7.3): `<tape_dir>/<tape_stem>.epvec.jsonl` — episode embeddings.
+/// Derived + rebuildable (backfilled from the episodes register); cleared on fingerprint mismatch.
+fn epvec_path_for(tape: &Path) -> PathBuf {
+    let stem = tape.file_stem().and_then(|s| s.to_str()).unwrap_or("tape");
+    let mut p = tape.to_path_buf();
+    p.set_file_name(format!("{stem}.epvec.jsonl"));
+    p
+}
+
 #[async_trait]
 impl Memory for FileMemory {
     /// Ring-0 (soul) + Ring-2 (recent working turns from the Tape), folded into the `system` preamble
@@ -555,6 +633,9 @@ impl Memory for FileMemory {
         // carries). Opt-in (needs an embedder).
         if self.recall_k > 0 {
             if let Some(embedder) = &self.embedder {
+                // A7.3: lazy cold-start backfill — an existing Tape/episode register gains its
+                // vector sidecars on first budgeted assemble (bounded, idempotent-by-existence).
+                self.backfill_vectors().await;
                 if let Some(query) = step.content.iter().find_map(|c| match c {
                     Content::Text { text } if !text.trim().is_empty() => Some(text.trim()),
                     _ => None,
@@ -562,7 +643,7 @@ impl Memory for FileMemory {
                     if let Ok(qv) = embedder.embed_text(query).await {
                         let recent_set: std::collections::HashSet<&String> = ring2.iter().collect();
                         let mut scored: Vec<(f32, String)> = self
-                            .read_vecs()
+                            .recall_candidates()
                             .into_iter()
                             .filter(|(t, _)| !recent_set.contains(t))
                             .map(|(t, v)| (cosine(&qv, &v), t))
@@ -571,8 +652,10 @@ impl Memory for FileMemory {
                         let cap = chars_cap(self.budget.ring4);
                         let mut used = 0usize;
                         let mut picks: Vec<String> = Vec::new();
-                        for (_, t) in scored.into_iter() {
-                            if picks.len() >= self.recall_k {
+                        for (s, t) in scored.into_iter() {
+                            // relevance floor: an orthogonal/degenerate match (cos <= 0) never
+                            // injects — k bounds how many, it never forces junk in.
+                            if picks.len() >= self.recall_k || s <= 0.0 {
                                 break;
                             }
                             let len = t.chars().count() + 1;
@@ -863,6 +946,7 @@ mod tests {
         let _ = std::fs::remove_file(vec_path_for(tape));
         let _ = std::fs::remove_file(vec_path_for(tape).with_extension("fp"));
         let _ = std::fs::remove_file(episodes_path_for(tape));
+        let _ = std::fs::remove_file(epvec_path_for(tape));
     }
 
     #[tokio::test]
@@ -1046,6 +1130,54 @@ mod tests {
         assert!(!eps[2].parsed, "the fallback stub is flagged, never silent");
         assert!(eps[2].what_happened.contains("unparsed"), "the stub says what it is");
         assert!(!eps[2].anchors.is_empty(), "anchors derived model-free from the turns");
+        clean_ring4(&tape);
+    }
+
+    // ── A7.3: the two-tier Ring-4 index (episodes + bounded turn window) + cold-start backfill ──
+
+    #[tokio::test]
+    async fn ring4_two_tier_recalls_episodes_beyond_the_turn_window() {
+        let tape = temp_tape("two-tier");
+        clean_ring4(&tape);
+        // window = 1: only the newest turn vector is scanned; episodes ALWAYS scan whole.
+        let mem = FileMemory::new("", &tape, 0)
+            .with_embedder(Arc::new(StubEmbed), Fingerprint::new("stub", 3), 3)
+            .with_recall_tuning(1, 32);
+        // an old France turn (falls outside the 1-turn window once a newer turn lands) …
+        mem.record(&trace("tell me about France", "Paris is the capital")).await.unwrap();
+        // … an episode digest about France (the coarse tier remembers what the window forgets) …
+        let out = "=== NARRATIVE ===\nArc.\n=== EPISODE ===\nhappened: discussed France geography\nchanged: -\nmatters: -\nunresolved: -\nanchors: France; Paris\n";
+        mem.store_consolidation(out).await.unwrap();
+        // … then a newer unrelated turn takes the only window slot.
+        mem.record(&trace("what is 2+2 math", "4")).await.unwrap();
+
+        let mut q = base_step();
+        q.content = vec![Content::Text { text: "a France question".into() }];
+        let a = mem.assemble(&q, &Context::default()).await.unwrap();
+        assert!(a.system.contains("[episode] discussed France geography"), "the episode tier recalls beyond the window");
+        assert!(!a.system.contains("Paris is the capital"), "the old raw turn is outside the bounded scan (O(window+episodes))");
+        assert!(!a.system.contains("2+2"), "an orthogonal match (cos<=0) never injects - the relevance floor");
+        clean_ring4(&tape);
+    }
+
+    #[tokio::test]
+    async fn cold_start_backfill_indexes_an_existing_tape_lazily() {
+        let tape = temp_tape("backfill");
+        clean_ring4(&tape);
+        // an existing Tape recorded BEFORE any embedder was wired (no vector sidecar) …
+        let plain = FileMemory::new("", &tape, 0);
+        plain.record(&trace("the France fact", "Paris")).await.unwrap();
+        plain.record(&trace("a math fact 2+2", "4")).await.unwrap();
+        assert!(!vec_path_for(&tape).exists());
+        // … then recall turns on (the A7.3 default): the first assemble backfills the bounded tail.
+        let mem = FileMemory::new("", &tape, 0)
+            .with_embedder(Arc::new(StubEmbed), Fingerprint::new("stub", 3), 1)
+            .with_recall_tuning(64, 32);
+        let mut q = base_step();
+        q.content = vec![Content::Text { text: "about France".into() }];
+        let a = mem.assemble(&q, &Context::default()).await.unwrap();
+        assert!(vec_path_for(&tape).exists(), "backfill created the turn sidecar from the Tape");
+        assert!(a.system.contains("Paris"), "the pre-embedder turn is immediately recallable");
         clean_ring4(&tape);
     }
 

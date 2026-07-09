@@ -198,8 +198,9 @@ async fn run_daemon() -> keel_contracts::Result<()> {
     let manifest = Manifest::load(&manifest_path)?;
     let mut ctx = new_context(&manifest);
     let engine = keel::Engine::assemble(&manifest)?;
-    // a memory handle for `--consolidate-every` self-consolidation (same Tape as the engine's memory).
-    let mem = keel_services::FileMemory::new("", keel::TAPE_PATH, 12);
+    // a memory handle for self-consolidation (same Tape as the engine's memory; A7 autopilot wiring —
+    // a wider window for consolidation).
+    let mem = keel::build_memory(&manifest, "", Some(12));
 
     // the template Step each self-initiated tick carries; the Driver stamps `Step.source` (canon §7).
     let template = Step {
@@ -351,7 +352,7 @@ async fn run_cold_eyes() -> keel_contracts::Result<()> {
     }
     let manifest = Manifest::load(&manifest_path)?;
     let mut ctx = new_context(&manifest);
-    let mem = keel_services::FileMemory::new("", keel::TAPE_PATH, 12);
+    let mem = keel::build_memory(&manifest, "", Some(12));
     let Some(prompt) = mem.cold_eyes_prompt() else {
         eprintln!("[keel] cold-eyes: no narrative to validate (run `keel consolidate` first)");
         return Ok(());
@@ -393,7 +394,7 @@ async fn run_consolidate() -> keel_contracts::Result<()> {
     }
     let manifest = Manifest::load(&manifest_path)?;
     let mut ctx = new_context(&manifest);
-    let mem = keel_services::FileMemory::new("", keel::TAPE_PATH, 12); // a wider window for consolidation
+    let mem = keel::build_memory(&manifest, "", Some(12)); // a wider window for consolidation
     let engine = keel::Engine::assemble(&manifest)?;
     match do_consolidation(&engine, &mem, &mut ctx).await? {
         0 => eprintln!("[keel] consolidate: the model returned an empty narrative; not stored"),

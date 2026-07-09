@@ -68,6 +68,10 @@ pub struct LlamaServerConfig {
     /// Where to send the server's stdout/stderr (None ⇒ discard).
     pub log_path: Option<String>,
     pub startup_timeout_secs: u64,
+    /// Serve `/v1/embeddings` instead of chat (A7.3 — the embed organ's own server; canon §11).
+    pub embedding: bool,
+    /// Pooling mode for an embedding server (Qwen3-Embedding wants `last`).
+    pub pooling: Option<String>,
 }
 
 impl LlamaServerConfig {
@@ -82,8 +86,38 @@ impl LlamaServerConfig {
             port: 8080,
             log_path: None,
             startup_timeout_secs: 90,
+            embedding: false,
+            pooling: None,
         }
     }
+}
+
+/// The llama-server argv for a config (factored for a model-free unit test; `launch` consumes it).
+fn build_args(cfg: &LlamaServerConfig) -> Vec<String> {
+    let mut a = vec![
+        "--model".to_string(),
+        cfg.model.clone(),
+        "--ctx-size".to_string(),
+        cfg.ctx_size.to_string(),
+        "--n-gpu-layers".to_string(),
+        cfg.n_gpu_layers.to_string(),
+        "--host".to_string(),
+        cfg.host.clone(),
+        "--port".to_string(),
+        cfg.port.to_string(),
+    ];
+    if let Some(mmproj) = &cfg.mmproj {
+        a.push("--mmproj".to_string());
+        a.push(mmproj.clone());
+    }
+    if cfg.embedding {
+        a.push("--embeddings".to_string());
+        if let Some(p) = &cfg.pooling {
+            a.push("--pooling".to_string());
+            a.push(p.clone());
+        }
+    }
+    a
 }
 
 /// A launched llama-server subprocess. **Dropping the handle does not kill the process** (so a
@@ -114,14 +148,7 @@ impl LlamaServer {
 /// `SUBSTRATE_UNRESOLVED` if it dies on startup or doesn't come up within the timeout.
 pub fn launch(cfg: &LlamaServerConfig) -> Result<LlamaServer> {
     let mut cmd = Command::new(&cfg.exe);
-    cmd.arg("--model").arg(&cfg.model)
-        .arg("--ctx-size").arg(cfg.ctx_size.to_string())
-        .arg("--n-gpu-layers").arg(cfg.n_gpu_layers.to_string())
-        .arg("--host").arg(&cfg.host)
-        .arg("--port").arg(cfg.port.to_string());
-    if let Some(mmproj) = &cfg.mmproj {
-        cmd.arg("--mmproj").arg(mmproj);
-    }
+    cmd.args(build_args(cfg));
     match &cfg.log_path {
         Some(p) => {
             if let Some(dir) = std::path::Path::new(p).parent() {
@@ -170,6 +197,12 @@ pub fn launch(cfg: &LlamaServerConfig) -> Result<LlamaServer> {
     }
 }
 
+/// Public `/health` readiness probe (A7.3): true only for a *ready* llama-server (`200`, not the
+/// loading `503`). The embed-substrate resolver uses this before deciding probe-vs-launch.
+pub fn health_ok(host: &str, port: u16, timeout: Duration) -> bool {
+    http_health_ok(host, port, timeout)
+}
+
 /// A minimal HTTP `GET /health` (dependency-free) — true only when the status line is `200`, so it
 /// distinguishes a *ready* llama-server from one still loading the model (which returns `503`).
 fn http_health_ok(host: &str, port: u16, timeout: Duration) -> bool {
@@ -208,6 +241,20 @@ mod tests {
         let p = l.local_addr().unwrap().port();
         drop(l);
         p
+    }
+
+    #[test]
+    fn build_args_maps_the_embedding_flags() {
+        let mut cfg = LlamaServerConfig::new("llama-server.exe", "m.gguf");
+        let base = build_args(&cfg);
+        assert!(!base.contains(&"--embeddings".to_string()), "chat server: no embed flags");
+        cfg.embedding = true;
+        cfg.pooling = Some("last".into());
+        cfg.port = 8090;
+        let a = build_args(&cfg);
+        assert!(a.windows(2).any(|w| w == ["--port", "8090"]), "the embed server gets its own port");
+        assert!(a.contains(&"--embeddings".to_string()), "embedding mode flag present");
+        assert!(a.windows(2).any(|w| w == ["--pooling", "last"]), "Qwen3-Embedding pooling=last");
     }
 
     #[test]

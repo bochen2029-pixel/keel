@@ -25,6 +25,8 @@ substrate:
     gate: vad                                    # transcribe only on voiced audio
   embedding:                                     # recall + cheap routing-classification — a Memory organ, NOT a tier
     id: qwen3-embedding-0.6b-q8                    # capable local default (~1024-dim, sovereign-safe)
+    file: qwen3-embedding-0.6b-q8_0.gguf           # on-disk name under servers.models_dir (downloaded 2026-07-09; A7.3)
+    port: 8090                                     # the embed llama-server's own port (the LLM owns :8080)
     sha256: TODO
     dim: 1024                                      # fingerprinted into the index; mismatch => rebuild-from-ledger
     disposition: shared                            # download-once system asset
