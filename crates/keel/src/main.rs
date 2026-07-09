@@ -330,12 +330,13 @@ async fn do_consolidation(
     let mut step = mem.consolidate().await?;
     let req = keel_kernel::engine::request_from_step(&step);
     let outcome = engine.run(&mut step, ctx, req).await?;
-    let narrative = outcome.result.content.trim();
-    if narrative.is_empty() {
-        return Ok(0);
+    // A7.2: one generation, two registers — the rolling Ring-3 narrative (overwritten) + one
+    // appended episode digest (durable). An unparsed layout stores a flagged deterministic stub.
+    let (n, parsed) = mem.store_consolidation(&outcome.result.content).await?;
+    if n > 0 && !parsed {
+        eprintln!("[keel] consolidate: episode layout unparsed - stored a deterministic fallback stub");
     }
-    mem.set_narrative(narrative)?;
-    Ok(narrative.len())
+    Ok(n)
 }
 
 /// `keel cold-eyes` — validate the model-authored Ring-3 narrative against the lossless Tape (canon

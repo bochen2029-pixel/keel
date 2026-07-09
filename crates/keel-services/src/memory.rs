@@ -60,6 +60,42 @@ fn take_chars(s: &str, max: usize) -> &str {
     }
 }
 
+/// A7.2 — one **episode digest**: the durable mid-resolution register between the rolling Ring-3
+/// narrative (topology, overwritten) and the raw Tape (everything, lossless). The REEL §6.2
+/// five-field consolidation schema. Episodes are **append-only and never re-compressed** — written
+/// once from near-in-time material, so compression-of-compression loss (REEL §10.2) cannot touch
+/// them. They cost zero context (never loaded wholesale): they are Ring-4 retrieval targets (A7.3)
+/// and the cold-eyes diff substrate (A7.5).
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct Episode {
+    /// Unix seconds when the consolidation ran (L4 reads a clock; the L0 contracts stay clock-free).
+    pub at_epoch_s: u64,
+    /// How many recent Tape turns this consolidation covered.
+    pub span_turns: usize,
+    pub what_happened: String,
+    pub what_changed: String,
+    pub what_matters: String,
+    pub unresolved: String,
+    /// Search keys for future retrieval (REEL "retrieval anchors").
+    pub anchors: Vec<String>,
+    /// `false` = a deterministic fallback stub (the model output missed the layout); flagged, never silent.
+    pub parsed: bool,
+}
+
+impl Episode {
+    /// The flat text used as this episode's Ring-4 embedding target (A7.3) and for prompt injection.
+    pub fn text(&self) -> String {
+        format!(
+            "[episode] {} | changed: {} | matters: {} | unresolved: {} | anchors: {}",
+            self.what_happened,
+            self.what_changed,
+            self.what_matters,
+            self.unresolved,
+            self.anchors.join("; ")
+        )
+    }
+}
+
 /// A file-backed [`Memory`] over the append-only **Tape** (canon §11). The Tape is the lossless
 /// system of record; the SQLite index (the `Spine`) is the derived, rebuildable checkpoint.
 pub struct FileMemory {
@@ -79,6 +115,9 @@ pub struct FileMemory {
     /// The Ring-4 vector sidecar (`<tape_stem>.vec.jsonl`): `{text, vec}` per recorded turn. Derived +
     /// rebuildable from the Tape; cleared on an embedder fingerprint mismatch (never serve stale, §11).
     vecs: PathBuf,
+    /// The A7.2 episodes register (`<tape_stem>.episodes.jsonl`): append-only five-field digests, one
+    /// per consolidation — the durable mid-resolution layer (never overwritten, never re-compressed).
+    episodes: PathBuf,
     /// How many semantically-relevant earlier turns Ring-4 injects (0 = off).
     recall_k: usize,
     /// A7.1 — the per-ring context budget (canon §7 "ringed + budgeted"; REEL §4.7). Declared in
@@ -97,6 +136,7 @@ impl FileMemory {
         let tape = tape.into();
         let narrative = narrative_path_for(&tape);
         let vecs = vec_path_for(&tape);
+        let episodes = episodes_path_for(&tape);
         Self {
             soul: soul.into(),
             tape,
@@ -104,6 +144,7 @@ impl FileMemory {
             working_turns,
             embedder: None,
             vecs,
+            episodes,
             recall_k: 0,
             budget: Self::default_budget(),
             lock: Mutex::new(()),
@@ -192,6 +233,142 @@ impl FileMemory {
         Ok(())
     }
 
+    // ── A7.2: the episodes register (append-only mid-resolution digests) ──
+
+    /// Append one episode to the register (append-only JSONL — never overwritten, unlike the
+    /// narrative). Best-effort dir creation; a write failure is an honest error (the register is a
+    /// durable layer, not a cache).
+    pub fn append_episode(&self, ep: &Episode) -> Result<()> {
+        use std::io::Write;
+        let line = serde_json::to_string(ep).map_err(|e| KeelError::Other(format!("episode encode: {e}")))?;
+        let _g = self.lock.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(dir) = self.episodes.parent() {
+            if !dir.as_os_str().is_empty() {
+                std::fs::create_dir_all(dir).map_err(|e| KeelError::Other(format!("episodes dir: {e}")))?;
+            }
+        }
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.episodes)
+            .map_err(|e| KeelError::Other(format!("episodes open: {e}")))?;
+        writeln!(f, "{line}").map_err(|e| KeelError::Other(format!("episodes write: {e}")))?;
+        Ok(())
+    }
+
+    /// Read the last `n` episodes in chronological order (best-effort; a garbled line is skipped —
+    /// the register outlives schema, like the Tape).
+    pub fn read_episodes(&self, n: usize) -> Vec<Episode> {
+        let Ok(raw) = std::fs::read_to_string(&self.episodes) else { return Vec::new() };
+        let mut eps: Vec<Episode> = raw.lines().rev().filter_map(|l| serde_json::from_str::<Episode>(l).ok()).take(n).collect();
+        eps.reverse();
+        eps
+    }
+
+    /// How many episodes the register holds (A7.4 policy input; a garbled line still counts a line).
+    pub fn episodes_count(&self) -> usize {
+        std::fs::read_to_string(&self.episodes).map(|s| s.lines().filter(|l| !l.trim().is_empty()).count()).unwrap_or(0)
+    }
+
+    /// Parse a consolidation turn's model output into `(narrative, episode-fields)` per the layout the
+    /// prompt requests (`=== NARRATIVE === / === EPISODE ===` with `key: value` lines). Tolerant:
+    /// missing markers → the whole output is the narrative and the episode is `None` (the caller
+    /// falls back to a deterministic stub — flagged `parsed: false`, never silent).
+    pub fn parse_consolidation(output: &str) -> (String, Option<Episode>) {
+        const N_MARK: &str = "=== NARRATIVE ===";
+        const E_MARK: &str = "=== EPISODE ===";
+        let (Some(ni), Some(ei)) = (output.find(N_MARK), output.find(E_MARK)) else {
+            return (output.trim().to_string(), None);
+        };
+        if ei < ni {
+            return (output.trim().to_string(), None);
+        }
+        let narrative = output[ni + N_MARK.len()..ei].trim().to_string();
+        let (mut happened, mut changed, mut matters, mut unresolved) =
+            (String::new(), String::new(), String::new(), String::new());
+        let mut anchors: Vec<String> = Vec::new();
+        for line in output[ei + E_MARK.len()..].lines() {
+            let line = line.trim();
+            let Some((key, val)) = line.split_once(':') else { continue };
+            let val = val.trim();
+            match key.trim().to_lowercase().as_str() {
+                "happened" => happened = val.to_string(),
+                "changed" => changed = val.to_string(),
+                "matters" => matters = val.to_string(),
+                "unresolved" => unresolved = val.to_string(),
+                "anchors" => anchors = val.split(';').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect(),
+                _ => {}
+            }
+        }
+        if happened.is_empty() && changed.is_empty() && matters.is_empty() {
+            return (if narrative.is_empty() { output.trim().to_string() } else { narrative }, None);
+        }
+        let ep = Episode {
+            at_epoch_s: now_epoch_s(),
+            span_turns: 0, // the caller stamps the span
+            what_happened: happened,
+            what_changed: changed,
+            what_matters: matters,
+            unresolved,
+            anchors,
+            parsed: true,
+        };
+        (narrative, Some(ep))
+    }
+
+    /// The deterministic fallback episode when the model output missed the layout: built model-free
+    /// from the consolidated turns' user texts (flagged `parsed: false` — visible, never silent).
+    fn fallback_episode(recent: &[Trace]) -> Episode {
+        let users: Vec<String> = recent
+            .iter()
+            .filter_map(|t| {
+                t.step.content.iter().find_map(|c| match c {
+                    Content::Text { text } => Some(text.trim().to_string()),
+                    _ => None,
+                })
+            })
+            .filter(|s| !s.is_empty())
+            .collect();
+        let anchors: Vec<String> =
+            users.iter().rev().take(4).map(|u| u.split_whitespace().take(5).collect::<Vec<_>>().join(" ")).collect();
+        Episode {
+            at_epoch_s: now_epoch_s(),
+            span_turns: recent.len(),
+            what_happened: format!("(unparsed consolidation) covered {} turn(s)", recent.len()),
+            what_changed: String::new(),
+            what_matters: String::new(),
+            unresolved: String::new(),
+            anchors,
+            parsed: false,
+        }
+    }
+
+    /// Store a consolidation turn's output into BOTH registers (A7.2): the rolling Ring-3 narrative
+    /// (overwritten — the topology) and one appended episode (durable — the mid-resolution layer).
+    /// Returns `(narrative_chars, episode_parsed)`; an empty output stores nothing (`(0, false)`).
+    pub async fn store_consolidation(&self, output: &str) -> Result<(usize, bool)> {
+        let out = output.trim();
+        if out.is_empty() {
+            return Ok((0, false));
+        }
+        let recent = self.recent_traces(self.working_turns);
+        let (narrative, parsed_ep) = Self::parse_consolidation(out);
+        let parsed = parsed_ep.is_some();
+        let mut ep = parsed_ep.unwrap_or_else(|| Self::fallback_episode(&recent));
+        ep.span_turns = recent.len();
+        self.set_narrative(&narrative)?;
+        self.append_episode(&ep)?;
+        // A7.3: the episode is a Ring-4 retrieval target — embed it into the episode vector sidecar.
+        self.embed_episode(&ep).await;
+        Ok((narrative.chars().count(), parsed))
+    }
+
+    /// Embed an episode into the Ring-4 episode index (best-effort; wired in A7.3 — a no-op without
+    /// an embedder, and an embed failure never fails the consolidation).
+    async fn embed_episode(&self, _ep: &Episode) {
+        // A7.3 fills this in (the two-tier index); a stub keeps A7.2 model-free and layer-complete.
+    }
+
     /// Build the consolidation prompt (canon §11 / the perpetual-memory proposal): a **self-interview /
     /// handshake + forward-narrative** instruction over the prior narrative + the recent turns. Pure
     /// string assembly (model-free, unit-testable); the model authors the *result* when this Step is
@@ -212,6 +389,19 @@ impl FileMemory {
         if let Some(c) = chars_cap(self.budget.ring3) {
             p.push_str(&format!("Keep the narrative under about {c} characters - it is loaded within a fixed budget.\n"));
         }
+        // A7.2: one generation, two artifacts — the rolling narrative (topology, overwritten) AND an
+        // append-only episode digest (the REEL five-field schema; the durable mid-resolution layer).
+        p.push_str(
+            "\nReply in EXACTLY this layout (both sections, keep the markers):\n\
+             === NARRATIVE ===\n\
+             <the narrative>\n\
+             === EPISODE ===\n\
+             happened: <one line - the factual core of the new turns>\n\
+             changed: <one line - what shifted>\n\
+             matters: <one line - why this deserves remembering>\n\
+             unresolved: <one line - open loops carried forward>\n\
+             anchors: <3-6 short search phrases, semicolon-separated>\n",
+        );
         if let Some(prior) = self.narrative() {
             p.push_str("\nPrior narrative:\n");
             p.push_str(&prior);
@@ -294,6 +484,22 @@ fn vec_path_for(tape: &Path) -> PathBuf {
     let stem = tape.file_stem().and_then(|s| s.to_str()).unwrap_or("tape");
     let mut p = tape.to_path_buf();
     p.set_file_name(format!("{stem}.vec.jsonl"));
+    p
+}
+
+/// Unix seconds now (L4 reads a clock — the L0 contracts stay clock-free, the same discipline as
+/// `svc::driver`). `0` if the system clock is before the epoch (never a panic).
+fn now_epoch_s() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// The A7.2 episodes-register path for a Tape: `<tape_dir>/<tape_stem>.episodes.jsonl` — append-only,
+/// never overwritten (unlike the rolling narrative). Derived-from-consolidation, but durable: the
+/// mid-resolution history layer.
+fn episodes_path_for(tape: &Path) -> PathBuf {
+    let stem = tape.file_stem().and_then(|s| s.to_str()).unwrap_or("tape");
+    let mut p = tape.to_path_buf();
+    p.set_file_name(format!("{stem}.episodes.jsonl"));
     p
 }
 
@@ -656,6 +862,7 @@ mod tests {
         let _ = std::fs::remove_file(narrative_path_for(tape));
         let _ = std::fs::remove_file(vec_path_for(tape));
         let _ = std::fs::remove_file(vec_path_for(tape).with_extension("fp"));
+        let _ = std::fs::remove_file(episodes_path_for(tape));
     }
 
     #[tokio::test]
@@ -777,5 +984,82 @@ mod tests {
         assert_eq!(take_chars("ab", 10), "ab");
         assert_eq!(chars_cap(0), None, "0 tokens = uncapped (the explicit opt-out)");
         assert_eq!(chars_cap(10), Some(40), "~4 chars per token");
+    }
+
+    // ── A7.2: the episodes register (append-only mid-resolution digests) ──
+
+    #[test]
+    fn parse_consolidation_extracts_both_registers() {
+        let out = "=== NARRATIVE ===\nThe arc so far: we built the thing.\n=== EPISODE ===\n\
+                   happened: built A7.2\nchanged: episodes now durable\nmatters: memory autopilot depends on it\n\
+                   unresolved: A7.3 wiring\nanchors: episodes register; autopilot; A7.2\n";
+        let (narr, ep) = FileMemory::parse_consolidation(out);
+        assert_eq!(narr, "The arc so far: we built the thing.");
+        let ep = ep.expect("episode parsed");
+        assert!(ep.parsed);
+        assert_eq!(ep.what_happened, "built A7.2");
+        assert_eq!(ep.what_changed, "episodes now durable");
+        assert_eq!(ep.unresolved, "A7.3 wiring");
+        assert_eq!(ep.anchors, vec!["episodes register", "autopilot", "A7.2"]);
+        assert!(ep.text().contains("[episode] built A7.2"), "the flat retrieval text carries the digest");
+    }
+
+    #[test]
+    fn parse_consolidation_missing_layout_falls_back_to_narrative_only() {
+        let (narr, ep) = FileMemory::parse_consolidation("just a plain narrative, no markers");
+        assert_eq!(narr, "just a plain narrative, no markers");
+        assert!(ep.is_none(), "no layout -> the caller stores a flagged deterministic stub");
+        // markers in the wrong order are treated as unparsed too (never a garbled slice).
+        let (n2, e2) = FileMemory::parse_consolidation("=== EPISODE ===\nx\n=== NARRATIVE ===\ny");
+        assert!(e2.is_none());
+        assert!(n2.contains("EPISODE"), "the whole output survives as the narrative");
+    }
+
+    #[tokio::test]
+    async fn store_consolidation_overwrites_narrative_but_appends_episodes() {
+        let tape = temp_tape("episodes");
+        clean_ring4(&tape);
+        let mem = FileMemory::new("", &tape, 5);
+        mem.record(&trace("first question about keels", "keels answered")).await.unwrap();
+
+        let out1 = "=== NARRATIVE ===\nArc v1.\n=== EPISODE ===\nhappened: one\nchanged: c1\nmatters: m1\nunresolved: u1\nanchors: a1; b1\n";
+        let (n1, p1) = mem.store_consolidation(out1).await.unwrap();
+        assert!(n1 > 0 && p1);
+        let out2 = "=== NARRATIVE ===\nArc v2 (rewritten).\n=== EPISODE ===\nhappened: two\nchanged: c2\nmatters: m2\nunresolved: u2\nanchors: a2\n";
+        let (_, p2) = mem.store_consolidation(out2).await.unwrap();
+        assert!(p2);
+
+        // the narrative is ROLLING (overwritten) …
+        assert_eq!(mem.narrative().unwrap(), "Arc v2 (rewritten).");
+        // … the episodes are DURABLE (append-only, both survive, chronological, span stamped).
+        let eps = mem.read_episodes(10);
+        assert_eq!(eps.len(), 2, "append-only: nothing is overwritten");
+        assert_eq!(eps[0].what_happened, "one");
+        assert_eq!(eps[1].what_happened, "two");
+        assert_eq!(eps[1].span_turns, 1, "the consolidated span is stamped");
+        assert_eq!(mem.episodes_count(), 2);
+        // an unparsed output still stores BOTH registers - the episode as a flagged stub.
+        let (n3, p3) = mem.store_consolidation("a layoutless blob narrative").await.unwrap();
+        assert!(n3 > 0 && !p3);
+        let eps = mem.read_episodes(10);
+        assert_eq!(eps.len(), 3);
+        assert!(!eps[2].parsed, "the fallback stub is flagged, never silent");
+        assert!(eps[2].what_happened.contains("unparsed"), "the stub says what it is");
+        assert!(!eps[2].anchors.is_empty(), "anchors derived model-free from the turns");
+        clean_ring4(&tape);
+    }
+
+    #[tokio::test]
+    async fn consolidation_prompt_requests_the_two_register_layout() {
+        let tape = temp_tape("layout");
+        clean_ring4(&tape);
+        let mem = FileMemory::new("", &tape, 5);
+        let s = mem.consolidate().await.unwrap();
+        let Content::Text { text } = &s.content[0] else { panic!("text prompt") };
+        assert!(text.contains("=== NARRATIVE ==="), "asks for the narrative section");
+        assert!(text.contains("=== EPISODE ==="), "asks for the episode section");
+        assert!(text.contains("anchors:"), "asks for retrieval anchors");
+        assert!(text.contains("characters"), "the ring-3 budget hint rides the prompt (A7.1)");
+        clean_ring4(&tape);
     }
 }

@@ -11,6 +11,7 @@ keel-adapters = { path = "../keel-adapters" }  # the whisper organ for the hear(
 keel-middleware = { path = "../keel-middleware" }  # reuse Redactor in the TraceSink scrub (services may import middleware, canon 6)
 async-trait = "0.1"
 regex = "1"
+serde = { version = "1", features = ["derive"] }  # Episode register derives (A7.2); already in the tree via contracts — no new external dep
 serde_json = "1"
 # default-features OFF strips resolve-http(reqwest)/resolve-file/tls(aws-lc-rs+cmake): the
 # SchemaOracle validates in-memory only — no network egress (I3) in a safety-critical oracle.
