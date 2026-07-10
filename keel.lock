@@ -57,6 +57,12 @@ substrate:
     # Re-open triggers: organic recall misses in lived use, or a recall_k=1 usage pattern.
   privacy:                                         # I3 mask, rung 3 — recall verification-pass (NOT the guarantee)
     id: openai-privacy-filter                      # bidirectional token-classifier (BIOES span head), 50M active / ~1.5B total, Apache-2.0
+    # PROVISIONED byte-exact 2026-07-10 (A5 un-gated by the operator): hf openai/privacy-filter ->
+    # C:\models\privacy-filter (onnx/model_quantized 1.62 GB int8-CPU + tokenizer.json + config +
+    # viterbi_calibration). Design + pre-registered C3 thresholds: docs/proposals/privacy-rung3.md.
+    file: onnx/model_quantized.onnx                # graph, under models_dir/privacy-filter (weights ride the .onnx_data sibling)
+    tokenizer: tokenizer.json                      # HF-tokenizers format, same dir
+    dir: privacy-filter                            # subdir under servers.models_dir
     sha256: TODO
     runtime: onnx                                  # in-process via the Rust `ort` crate (or transformers) — NOT a GGUF, NOT llama.cpp, no server to supervise
     disposition: shared                            # ~1GB weights, download-once (too big to bake in); but runs in-process like the embedder, unlike the server-based LLM/Whisper

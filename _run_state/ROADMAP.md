@@ -107,9 +107,18 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   top-k from the `.vec.jsonl` sidecar → injects "Relevant earlier" (dedup vs Ring-2); embed-on-record;
   fingerprint-mismatch clears the stale sidecar. **Opt-in** (genome default off — no live embed dep).
   +3 tests. Remaining: the C1/C2 uplift falsifiers (model) + a live/default embed wiring.
-- `[G] A5` · **privacy rung-3** — OpenAI Privacy Filter via `ort`/ONNX (in-process, NOT GGUF), behind
-  `GOLDEN_PRIVACY`; additive recall, **never the guarantee** (rungs 1-2 carry it). **Operator: least
-  urgent / LAST.** **New dep:** `ort` (heavy native). → ISSUE-2.
+- `[~] A5` · **privacy rung-3** — OpenAI Privacy Filter via `ort`/ONNX (in-process, NOT GGUF), behind
+  `GOLDEN_PRIVACY`; additive recall, **never the guarantee** (rungs 1-2 carry it). **UN-GATED by the
+  operator 2026-07-10 ("go ahead with A5") — polish item #1 in flight.** **PROVISIONED + DESIGNED
+  same day:** the model was NOT on disk (ISSUE-2's note was aspirational) → found `openai/privacy-filter`
+  on HF (released 2026-04-17, post-genesis; Apache-2.0) → **downloaded byte-exact** (quantized-CPU
+  ONNX 1.62 GB + tokenizer + config + viterbi calibration; 33 BIOES labels / 8 PII classes incl.
+  `private_person` — the frozen golden's exact case). **Design + pre-registered C3 thresholds:
+  `docs/proposals/privacy-rung3.md`** (PiiClassifier trait in middleware · ort impl feature-gated in
+  services · additive-only · egress-only · KEEL-owned Viterbi with the recall bias · graceful degrade ·
+  C3: golden-case + ≥+0.30 recall uplift + ≤10% FP + ≤500 ms p95, else stays OFF). **Remaining (one
+  focused session): the `ort`+`tokenizers` build → seam → golden green → the C3 fixture + decision.**
+  **New dep:** `ort` (heavy native, feature-gated). → ISSUE-2.
 - `[~] A6` · **memory narrative register + consolidation** — operator-directed 2026-06-15 (was `[G]`
   ISSUE-3; the operator steered me onto it, so the **safe structural cut** proceeded; the riskier
   model-dependent generation stays for a careful pass).
