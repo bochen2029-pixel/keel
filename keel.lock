@@ -67,7 +67,12 @@ substrate:
     runtime: onnx                                  # in-process via the Rust `ort` crate (or transformers) — NOT a GGUF, NOT llama.cpp, no server to supervise
     disposition: shared                            # ~1GB weights, download-once (too big to bake in); but runs in-process like the embedder, unlike the server-based LLM/Whisper
     decode: viterbi                                # span-decode is deterministic, app-level, KEEL-owned -> the operating point is a NON-model knob
-    default: off                                   # rungs 1-2 (markers+regex) ship Stage 0; model lands Stage 2 behind GOLDEN_PRIVACY
+    default: on                                    # C3 DECIDED ON 2026-07-10 (pre-registered thresholds, all cleared decisively):
+    # GOLDEN_PRIVACY model_adds_span LIVED (Dana -> [REDACTED], rung3:private_person) - fixture uplift
+    # +0.95 (bar 0.30) - 0/10 false positives (bar 10%) - p50/p95 = 97/161 ms (bar 500) - load 1.25 s once.
+    # Semantics: rung-3 rides EGRESS-ONLY in builds carrying the `privacy-model` feature (ort+tokenizers
+    # stay out of the default minimal-core build); rungs 1-2 remain the guarantee forever (canon 5.1).
+    # Artifact: .keelstate/bench/privacy-c3.json.
     operating_point: recall                        # = the Viterbi transition-bias: tune toward over-redaction; leak-uncertain => sovereign
     per_cell_finetune: true                        # general PII | medical PHI | code/secrets
     scrub_before_distill: true                     # reversibility gate: no secret fossilized into a LoRA

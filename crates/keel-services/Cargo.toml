@@ -16,6 +16,11 @@ serde_json = "1"
 # default-features OFF strips resolve-http(reqwest)/resolve-file/tls(aws-lc-rs+cmake): the
 # SchemaOracle validates in-memory only — no network egress (I3) in a safety-critical oracle.
 jsonschema = { version = "0.46.5", default-features = false }
+ort = { version = "2.0.0-rc.12", optional = true }
+# default-features OFF drops esaxx-rs/onig (C++ objs whose /MT CRT collides with ort's /MD
+# onnxruntime on MSVC — lived, A5) — inference needs neither (esaxx is unigram TRAINING);
+# fancy-regex is the pure-Rust pretokenizer path.
+tokenizers = { version = "0.23.1", optional = true, default-features = false, features = ["fancy-regex"] }
 
 [features]
 # the listen() retina: pull keel-adapters' cpal microphone capture organ (canon §12 ears). Off by
@@ -24,6 +29,10 @@ mic = ["keel-adapters/mic"]
 # the see_screen() retina: pull keel-adapters' xcap screen capture organ (canon §12 eyes). Off by
 # default (minimal-core, §3.5).
 screen = ["keel-adapters/screen"]
+# privacy rung-3 (A5, canon §5.1): the OpenAI privacy filter over in-process CPU ONNX. Off by
+# default — the heaviest optional dep in the tree (ort fetches the onnxruntime binary at build);
+# the default genome pays nothing (minimal-core, §3.5). The guarantee stays on rungs 1–2 forever.
+privacy-model = ["dep:ort", "dep:tokenizers"]
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt"] }

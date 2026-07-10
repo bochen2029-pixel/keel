@@ -358,7 +358,7 @@ impl Engine {
             FileAuditSink::new(AUDIT_LEDGER).map_err(|e| KeelError::Other(format!("ledger {AUDIT_LEDGER}: {e}")))?,
         );
         // operator sovereign markers (rung 1) are a future manifest field; rung 2 runs regardless.
-        let redactor = Arc::new(Redactor::new(vec![]));
+        let redactor = Arc::new(attach_rung3(Redactor::new(vec![]), manifest));
 
         let mut slots = BTreeMap::new();
         for (name, tcfg) in &manifest.tiers {
@@ -493,6 +493,31 @@ pub fn assemble(manifest: &Manifest, tier_override: Option<&str>) -> Result<Asse
     let chain = build_chain(sink, Arc::new(Redactor::new(vec![])), manifest.cost.hard_stop_at, egress);
 
     Ok(Assembled { tier_name, model: tcfg.model.clone(), tier, chain, registry })
+}
+
+/// Privacy rung 3 (A5/C3 DECIDED ON, 2026-07-10): attach the OpenAI privacy filter to the
+/// egress mask when the `privacy-model` feature is compiled in AND the substrate loads —
+/// graceful degrade to rungs 1–2 otherwise (they carry the guarantee forever, canon §5.1).
+#[cfg(feature = "privacy-model")]
+fn attach_rung3(redactor: Redactor, manifest: &Manifest) -> Redactor {
+    let dir = std::path::Path::new(&manifest.servers.models_dir).join("privacy-filter");
+    match keel_services::privacy_model::OnnxPiiClassifier::load(&dir, 0.0) {
+        Ok(c) => {
+            eprintln!("[keel] privacy rung-3 wired (egress-only; openai/privacy-filter, CPU)");
+            redactor.with_classifier(Arc::new(c))
+        }
+        Err(e) => {
+            eprintln!("[keel] privacy rung-3 unavailable ({e}) - rungs 1-2 carry the mask");
+            redactor
+        }
+    }
+}
+
+/// Without the `privacy-model` feature the default genome stays deterministic-only (minimal-core:
+/// no ort/tokenizers in the tree; the C3-ON decision applies to feature-carrying builds).
+#[cfg(not(feature = "privacy-model"))]
+fn attach_rung3(redactor: Redactor, _manifest: &Manifest) -> Redactor {
+    redactor
 }
 
 // ── shared construction ───────────────────────────────────────────────────────

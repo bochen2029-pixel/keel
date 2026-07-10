@@ -19,6 +19,8 @@ pub mod driver;
 pub mod maintenance;
 pub mod memory;
 pub mod perception;
+#[cfg(feature = "privacy-model")]
+pub mod privacy_model;
 pub mod recall;
 pub mod router;
 pub mod trace_sink;

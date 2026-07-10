@@ -22,14 +22,34 @@ use std::sync::Arc;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Finding {
     pub kind: String,
-    /// 1 = operator marker, 2 = structured regex/checksum.
+    /// 1 = operator marker, 2 = structured regex/checksum, 3 = model classifier (additive recall).
     pub rung: u8,
 }
 
-/// The deterministic redactor (rungs 1–2). Compiles its patterns once.
+/// A model-detected PII span (rung 3): **byte** offsets into the original text + the class label
+/// (e.g. `private_person`). The value itself is never retained.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PiiSpan {
+    pub start: usize,
+    pub end: usize,
+    pub class: String,
+}
+
+/// The rung-3 seam (canon §5.1): a probabilistic classifier that ADDS recall over the
+/// deterministic rungs — **never the guarantee, structurally unable to unmask** (its spans join
+/// the rung-1/2 union; a union only grows). Sync by design: rung 3 is in-process CPU inference
+/// (the OpenAI privacy filter over `ort`), not a server call. Implementations live at L4+
+/// (feature-gated, heavy deps stay out of the default genome); this module owns only the seam.
+pub trait PiiClassifier: Send + Sync {
+    fn spans(&self, text: &str) -> Vec<PiiSpan>;
+}
+
+/// The redactor: deterministic rungs 1–2 always; an optional rung-3 classifier joins on the
+/// model-assisted path ([`Redactor::redact_with_model`]) only. Compiles its patterns once.
 pub struct Redactor {
     markers: Vec<String>,
     patterns: Vec<(&'static str, Regex)>,
+    classifier: Option<Arc<dyn PiiClassifier>>,
 }
 
 impl Redactor {
@@ -46,14 +66,20 @@ impl Redactor {
             .iter()
             .map(|(k, p)| (*k, Regex::new(p).expect("static pattern is valid")))
             .collect();
-        Self { markers, patterns }
+        Self { markers, patterns, classifier: None }
     }
 
-    /// Redact every marker/PII span (the union) with `[REDACTED]`; return the scrubbed text and
-    /// the findings. Empty findings ⇒ the text is returned unchanged.
-    pub fn redact(&self, text: &str) -> (String, Vec<Finding>) {
-        // (start, end, kind, rung)
-        let mut spans: Vec<(usize, usize, &str, u8)> = Vec::new();
+    /// Attach the rung-3 classifier (the L5 wiring does this when the `privacy-model` substrate
+    /// resolves). Only [`Redactor::redact_with_model`] consults it; [`Redactor::redact`] stays
+    /// deterministic-only forever.
+    pub fn with_classifier(mut self, classifier: Arc<dyn PiiClassifier>) -> Self {
+        self.classifier = Some(classifier);
+        self
+    }
+
+    /// The deterministic rung-1/2 span sweep: (start, end, kind, rung).
+    fn deterministic_spans(&self, text: &str) -> Vec<(usize, usize, String, u8)> {
+        let mut spans: Vec<(usize, usize, String, u8)> = Vec::new();
 
         // rung 1 — operator markers (exact, case-sensitive)
         for m in self.markers.iter().filter(|m| !m.is_empty()) {
@@ -61,7 +87,7 @@ impl Redactor {
             while let Some(rel) = text[from..].find(m.as_str()) {
                 let s = from + rel;
                 let e = s + m.len();
-                spans.push((s, e, "operator_marker", 1));
+                spans.push((s, e, "operator_marker".to_string(), 1));
                 from = e;
             }
         }
@@ -72,18 +98,18 @@ impl Redactor {
                 if *kind == "credit_card" && !luhn_ok(mat.as_str()) {
                     continue;
                 }
-                spans.push((mat.start(), mat.end(), kind, 2));
+                spans.push((mat.start(), mat.end(), (*kind).to_string(), 2));
             }
         }
+        spans
+    }
 
+    /// Mask the span union with `[REDACTED]` and derive the findings. Empty ⇒ unchanged text.
+    fn mask(text: &str, mut spans: Vec<(usize, usize, String, u8)>) -> (String, Vec<Finding>) {
         if spans.is_empty() {
             return (text.to_string(), Vec::new());
         }
-
-        let findings = spans
-            .iter()
-            .map(|(_, _, k, r)| Finding { kind: (*k).to_string(), rung: *r })
-            .collect();
+        let findings = spans.iter().map(|(_, _, k, r)| Finding { kind: k.clone(), rung: *r }).collect();
 
         // merge overlapping spans, then rebuild with the placeholder
         spans.sort_by_key(|s| s.0);
@@ -104,6 +130,33 @@ impl Redactor {
         }
         out.push_str(&text[cur..]);
         (out, findings)
+    }
+
+    /// Redact every marker/PII span (the rung-1/2 union) with `[REDACTED]`; return the scrubbed
+    /// text and the findings. **Deterministic-only — the guarantee path** (canon §5.1); empty
+    /// findings ⇒ the text is returned unchanged.
+    pub fn redact(&self, text: &str) -> (String, Vec<Finding>) {
+        Self::mask(text, self.deterministic_spans(text))
+    }
+
+    /// The model-assisted path: rungs 1–2 **plus** the rung-3 classifier's spans (additive-only —
+    /// the model joins the union, it can never shrink it). No classifier wired ⇒ identical to
+    /// [`Redactor::redact`]. Model spans with invalid offsets (out of range / not on a char
+    /// boundary) are dropped defensively — a bad span must never panic the mask.
+    pub fn redact_with_model(&self, text: &str) -> (String, Vec<Finding>) {
+        let mut spans = self.deterministic_spans(text);
+        if let Some(c) = &self.classifier {
+            for s in c.spans(text) {
+                let valid = s.start < s.end
+                    && s.end <= text.len()
+                    && text.is_char_boundary(s.start)
+                    && text.is_char_boundary(s.end);
+                if valid {
+                    spans.push((s.start, s.end, s.class, 3));
+                }
+            }
+        }
+        Self::mask(text, spans)
     }
 }
 
@@ -154,7 +207,9 @@ impl Middleware for PrivacyMiddleware {
             for msg in &mut req.messages {
                 for content in &mut msg.content {
                     if let Content::Text { text } = content {
-                        let (scrubbed, findings) = self.redactor.redact(text);
+                        // EGRESS = the model-assisted path (rung 3 rides here only, canon §5.1 —
+                        // the sovereignty-critical direction; the $0 local path never pays it).
+                        let (scrubbed, findings) = self.redactor.redact_with_model(text);
                         for f in &findings {
                             labels.push(format!("rung{}:{}", f.rung, f.kind));
                         }
@@ -397,5 +452,75 @@ mod tests {
                 "output redaction is I1-audited (egress={egress})"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod rung3_tests {
+    use super::{PiiClassifier, PiiSpan, Redactor};
+    use std::sync::Arc;
+
+    /// A stub rung-3: flags every occurrence of "Dana" as a private_person span.
+    struct DanaStub;
+    impl PiiClassifier for DanaStub {
+        fn spans(&self, text: &str) -> Vec<PiiSpan> {
+            text.match_indices("Dana")
+                .map(|(s, m)| PiiSpan { start: s, end: s + m.len(), class: "private_person".into() })
+                .collect()
+        }
+    }
+
+    /// A stub that returns garbage offsets - the mask must drop them, never panic.
+    struct BadOffsets;
+    impl PiiClassifier for BadOffsets {
+        fn spans(&self, text: &str) -> Vec<PiiSpan> {
+            vec![
+                PiiSpan { start: 5, end: 3, class: "x".into() },
+                PiiSpan { start: 0, end: text.len() + 40, class: "x".into() },
+                PiiSpan { start: 1, end: 2, class: "mid-char".into() },
+            ]
+        }
+    }
+
+    #[test]
+    fn rung3_adds_a_span_rungs_1_2_miss_and_is_additive_only() {
+        // the GOLDEN_PRIVACY mechanic: "...met Dana at..." carries no marker/regex hit -
+        // deterministic-only passes it through; the model-assisted path masks it (rung 3).
+        let text = "yesterday I met Dana at the harbor office";
+        let plain = Redactor::new(vec![]);
+        let (kept, none) = plain.redact(text);
+        assert_eq!(kept, text);
+        assert!(none.is_empty(), "rungs 1-2 cannot catch an arbitrary name");
+        let r = Redactor::new(vec![]).with_classifier(Arc::new(DanaStub));
+        // the deterministic path NEVER consults the model (the guarantee stays deterministic).
+        let (still, f0) = r.redact(text);
+        assert_eq!(still, text);
+        assert!(f0.is_empty());
+        // the model-assisted path masks the model span and reports it as rung 3.
+        let (scrubbed, findings) = r.redact_with_model(text);
+        assert!(!scrubbed.contains("Dana"), "the model span is masked: {scrubbed}");
+        assert!(scrubbed.contains("[REDACTED]"));
+        assert!(findings.iter().any(|f| f.rung == 3 && f.kind == "private_person"));
+    }
+
+    #[test]
+    fn rung3_overlap_with_rung2_merges_and_both_findings_report() {
+        // an email (rung 2) sitting where the model also flags a person - one mask, two findings.
+        let text = "write to Dana dana@example.test today";
+        let r = Redactor::new(vec![]).with_classifier(Arc::new(DanaStub));
+        let (scrubbed, findings) = r.redact_with_model(text);
+        assert!(!scrubbed.contains("dana@example.test"));
+        assert!(!scrubbed.contains("Dana"));
+        assert!(findings.iter().any(|f| f.rung == 2 && f.kind == "email"));
+        assert!(findings.iter().any(|f| f.rung == 3));
+    }
+
+    #[test]
+    fn invalid_model_offsets_are_dropped_never_panicking() {
+        let text = "\u{00e9}clair time"; // multi-byte first char: offset 1 is mid-char
+        let r = Redactor::new(vec![]).with_classifier(Arc::new(BadOffsets));
+        let (scrubbed, findings) = r.redact_with_model(text);
+        assert_eq!(scrubbed, text, "all garbage spans dropped -> unchanged");
+        assert!(findings.is_empty());
     }
 }

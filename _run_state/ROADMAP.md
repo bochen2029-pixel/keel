@@ -107,9 +107,14 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   top-k from the `.vec.jsonl` sidecar → injects "Relevant earlier" (dedup vs Ring-2); embed-on-record;
   fingerprint-mismatch clears the stale sidecar. **Opt-in** (genome default off — no live embed dep).
   +3 tests. Remaining: the C1/C2 uplift falsifiers (model) + a live/default embed wiring.
-- `[~] A5` · **privacy rung-3** — OpenAI Privacy Filter via `ort`/ONNX (in-process, NOT GGUF), behind
-  `GOLDEN_PRIVACY`; additive recall, **never the guarantee** (rungs 1-2 carry it). **UN-GATED by the
-  operator 2026-07-10 ("go ahead with A5") — polish item #1 in flight.** **PROVISIONED + DESIGNED
+- `[x] A5` · **privacy rung-3 — DONE + LIVED + C3-DECIDED-ON, 2026-07-10** (the ort build landed
+  same day): `PiiClassifier` seam in `mw::privacy` (additive-only union; deterministic path
+  untouched forever) · `svc::privacy_model::OnnxPiiClassifier` behind the `privacy-model` feature
+  (ort 2.0.0-rc.12 + tokenizers pure-Rust path — the esaxx/CRT link clash solved by dropping
+  training-only C++ deps) · KEEL-owned BIOES Viterbi (calibrated biases + the recall dial, incl.
+  sequence-start-as-background so the dial works on short texts) · egress-only placement · L5
+  `attach_rung3` with graceful degrade · +3 mw tests, +3 viterbi tests, live golden + C3 bench.
+  Gate 181/7/0 + clippy 0 (both modes). See C3 above for the decision numbers. — was `[~]`: **PROVISIONED + DESIGNED
   same day:** the model was NOT on disk (ISSUE-2's note was aspirational) → found `openai/privacy-filter`
   on HF (released 2026-04-17, post-genesis; Apache-2.0) → **downloaded byte-exact** (quantized-CPU
   ONNX 1.62 GB + tokenizer + config + viterbi calibration; 33 BIOES labels / 8 PII classes incl.
@@ -257,7 +262,13 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   against Qwen3's rankings (but the floor wins the untuned families broadly), and Qwen3 ran as-built
   (no instruct-prefix queries). **Re-open triggers:** the Qwen3 instruct-prefix experiment · a
   symmetric-hardening set pass. Qwen3 stays on disk as the lock `fallback`.
-- `[?] C3` privacy model vs deterministic-only on `GOLDEN_PRIVACY`. (after A5)
+- `[x] C3` privacy model vs deterministic-only on `GOLDEN_PRIVACY` — **DECIDED ON 2026-07-10**
+  (pre-registered thresholds, all cleared decisively): the frozen `model_adds_span` case **LIVED**
+  (Dana → `[REDACTED]`, `rung3:private_person`) · fixture uplift **+0.95** (bar 0.30; deterministic
+  0.00 → with-model 0.95 on 20 model-class positives) · **0/10 false positives** (bar 10%) ·
+  p50/p95 **97/161 ms** (bar 500), load 1.25 s once. Artifact `.keelstate/bench/privacy-c3.json`.
+  keel.lock `privacy.default: on` (egress-only, feature-carrying builds; rungs 1–2 stay the
+  guarantee). L5 wiring landed (`attach_rung3`, graceful degrade).
 - `[x] C4` `rework_rate` < 10% with oracles on — **PASS, DECIDED 2026-07-10:** rework_rate
   **0.014 (1.4%)** over the 73-turn lifetime index (incl. real cell traffic), oracles on — 7×
   under the bar, with 4× the prelim N and the trend IMPROVING (0.056 → 0.014). Re-check rides
@@ -386,8 +397,9 @@ just post-DONE, to catch drift early.)*
   **RESOLVED 2026-06-15** (per "decide, never ask"): chose **brute-force cosine, NO `sqlite-vec`**;
   fingerprint `(embedder_id, dim)` + rebuild-from-ledger on mismatch. A3 first pass landed; sqlite-vec
   revisited only if memory size makes brute force slow.
-- **ISSUE-2 [operator · least-urgent/LAST]** — A5 privacy rung-3 needs `ort` (heavy native) + is the
-  operator's explicit last item. Defer to the end; `openai/privacy-filter` model at `C:\models`.
+- **ISSUE-2 — RESOLVED 2026-07-10** — A5 built + C3 decided ON (the operator's LAST, delivered
+  last: the model was provisioned from HF — the "at C:\models" note had been aspirational —
+  and the `ort` dep landed feature-gated so the default genome stays heavy-dep-free).
 - **ISSUE-3 [operator-review]** — A6 memory narrative register = the highest-risk seam-cut; reserved
   for the operator. Propose the design here first (vs `perpetual-memory.md`).
 - **ISSUE-4 — RESOLVED 2026-07-10** — B1 amplify decided **OFF** on the fixed-set benchmark

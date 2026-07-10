@@ -19,7 +19,7 @@ lands at SEXTANT S4).
 | **amplify (B1)** | **OFF** — uplift +0.115 < the pre-registered 0.15 | `amplify-n8.json` artifact; kernel loop + bench stay built; keel.lock annotated |
 | **reranker (C1)** | **OFF (identity)** — +0.070 recall@5 < 0.10 | ratified golden-recall v2; artifacts in `.keelstate/bench/`; seam+adapter stay built |
 | **embedder (C2)** | **the MiniLM floor took the default** (falsifier trip: −0.122 nDCG for the "upgrade") | flip executed + lived (fingerprint rebuild 0→30 vecs); Qwen3 = lock fallback |
-| **privacy model (A5/C3)** | **EXCLUDED — operator's explicit LAST** (see §6) | ISSUE-2 standing directive; rungs 1–2 carry the I3 guarantee by design (canon §5.1) |
+| **privacy model (A5/C3)** | **ON — decided 2026-07-10, same day** (exclusion #1 CLOSED): golden `model_adds_span` lived; uplift +0.95 (bar 0.30); 0/10 FP; p95 161 ms | `.keelstate/bench/privacy-c3.json`; keel.lock `privacy.default: on` (egress-only, feature-carrying builds; rungs 1–2 stay the guarantee) |
 | **flywheel (B3)** | **base case HOLDS; ignition deferred on evidence** | escalation 0.000 over the 73-turn lifetime; 59-pair corpus; triggers + turnkey pipeline in `docs/flywheel-ignition.md` |
 | **rework (C4)** | **PASS** — 0.014 < 0.10, trend improving | lifetime `keel metrics` |
 | **economics (C5)** | **KEEL-favorable, re-confirmed at 4× the prelim N**: 72/73 turns routed FREE local, lifetime $0.0004 vs ~$0.01–0.04 for cheap-API-everything (≥ ~96% saved) | lifetime `keel metrics` `by_tier` |
@@ -62,21 +62,22 @@ exposure: the freeze gate covers the goldens, and substrate files are operator-p
 nice-to-have) · 9 resolved (mask-all-output) · 10 resolved (embed GGUF) · 11 resolved (set
 ratified + MiniLM provisioned).
 
-## 6 · The two exclusions (explicit, auditable, reversible)
+## 6 · The exclusions (explicit, auditable, reversible)
 
-1. **A5 privacy rung-3 + its C3 falsifier.** The operator's standing directive (ISSUE-2,
-   2026-06-15: "least urgent / LAST") and his sequencing today (E2 chosen with A5 open) are taken
-   as the §3 "explicitly accepted" operator call. Safety posture is unchanged by the exclusion:
-   canon §5.1 places the I3 *guarantee* on the deterministic rungs 1–2 (shipped, tested, lived);
-   rung-3 is additive recall. **A5+C3 is polish-mode item #1** — building it re-opens C3's
-   falsifier with the usual pre-registered discipline.
+1. ~~**A5 privacy rung-3 + its C3 falsifier.**~~ **CLOSED 2026-07-10, the same day** (operator:
+   "go ahead with A5" → "go ahead with the ort build"): built, lived, and **C3 decided ON** under
+   the pre-registered thresholds — see §2's row and `docs/proposals/privacy-rung3.md`. The
+   guarantee never moved: rungs 1–2 remain the deterministic oracle; rung-3 is additive recall on
+   egress, in feature-carrying builds.
 2. **ISSUE-6 `sha256:` pins** (operator-only). Until pinned, `kernel::lock` verify stays unbuilt/
    dormant by design. Re-open = the operator pins; the verify slice follows.
 
-If the operator wants either closed BEFORE the DONE stands, this review remains valid as written —
-strike the exclusion, do the work, re-stamp the verdict line.
+## 7 · Verdict (re-stamped 2026-07-10, same day)
 
-## 7 · Verdict
+**E2: PASS — KEEL is DONE, with ONE remaining exclusion (ISSUE-6, operator-only pins).** Every
+stage knob including the privacy model is now **decided, none skipped** — the §3 letter is met in
+full on the agent-buildable surface. *(Original verdict below, superseded only in its exclusion
+count.)*
 
 **E2: PASS — KEEL is DONE, with the two §6 exclusions explicitly accepted.** Stage 0–3 machinery
 built and every decidable falsifier **measured-and-decided under pre-registered thresholds** (C1,
