@@ -105,6 +105,10 @@ fn build_args(cfg: &LlamaServerConfig) -> Vec<String> {
         cfg.host.clone(),
         "--port".to_string(),
         cfg.port.to_string(),
+        // jinja templating: required for `chat_template_kwargs` (the thinking toggle) to take
+        // effect on Qwen-family templates — without it the toggle is silently ignored and a
+        // `<think>` prefix breaks strict constrained decode (lived, D1 2026-07-09).
+        "--jinja".to_string(),
     ];
     if let Some(mmproj) = &cfg.mmproj {
         a.push("--mmproj".to_string());
@@ -247,6 +251,7 @@ mod tests {
     fn build_args_maps_the_embedding_flags() {
         let mut cfg = LlamaServerConfig::new("llama-server.exe", "m.gguf");
         let base = build_args(&cfg);
+        assert!(base.contains(&"--jinja".to_string()), "jinja templating on (the thinking toggle needs it)");
         assert!(!base.contains(&"--embeddings".to_string()), "chat server: no embed flags");
         cfg.embedding = true;
         cfg.pooling = Some("last".into());

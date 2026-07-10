@@ -142,19 +142,40 @@ impl Engine {
             // no ring assembly for a maintenance turn
         } else if let Some(mem) = &self.memory {
             let assembled = mem.assemble(step, ctx).await?;
-            let mut preamble: Vec<Message> = Vec::new();
             if !assembled.system.is_empty() {
-                preamble.push(Message {
-                    role: Role::System,
-                    content: vec![Content::Text { text: assembled.system }],
-                    name: None,
-                    reasoning_content: None,
-                    tool_call_id: None,
-                });
+                // A caller may already carry its OWN system message (an over-protocol cell does) —
+                // chat templates require system FIRST and ONLY ONCE (jinja raises otherwise —
+                // lived, D1 2026-07-09), so the memory preamble MERGES into it rather than
+                // stacking a second system message above it.
+                let merged = match req.messages.first_mut() {
+                    Some(first) if matches!(first.role, Role::System) => {
+                        if let Some(Content::Text { text }) = first.content.first_mut() {
+                            *text = format!("{}\n\n{}", assembled.system, text);
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    _ => false,
+                };
+                if !merged {
+                    req.messages.insert(
+                        0,
+                        Message {
+                            role: Role::System,
+                            content: vec![Content::Text { text: assembled.system }],
+                            name: None,
+                            reasoning_content: None,
+                            tool_call_id: None,
+                        },
+                    );
+                }
             }
-            preamble.extend(assembled.exemplars);
-            preamble.extend(assembled.conversation);
-            req.messages.splice(0..0, preamble);
+            // Ring-1/Ring-2 messages go AFTER the (single) system message, before the live turn.
+            let at = usize::from(matches!(req.messages.first().map(|m| &m.role), Some(Role::System)));
+            let mut rings: Vec<Message> = assembled.exemplars;
+            rings.extend(assembled.conversation);
+            req.messages.splice(at..at, rings);
         }
 
         // (2) route — the cheapest tier that clears the trust bar, or BLOCK (I4 / reversibility).
@@ -651,6 +672,35 @@ mod tests {
         assert_eq!(msgs.len(), 1);
         assert!(matches!(msgs[0].role, Role::System));
         assert!(matches!(&msgs[0].content[0], Content::Text { text } if text == "SOUL"));
+    }
+
+    #[tokio::test]
+    async fn memory_preamble_merges_into_a_callers_existing_system_message() {
+        // an over-protocol cell sends its OWN system message; the memory preamble must MERGE into
+        // it (jinja templates require system first + only once), never stack a second one.
+        let echo = echo(0.0);
+        let seen = echo.seen.clone();
+        let engine = engine_with(
+            one_local(echo),
+            Box::new(FixedRouter("local")),
+            Arc::new(EvidenceOracle),
+            Arc::new(RecSpine::default()),
+            Some(Arc::new(SoulMemory)),
+            None,
+        );
+        let mut r = req();
+        r.messages.push(Message {
+            role: Role::System,
+            content: vec![Content::Text { text: "CELL-SYSTEM".into() }],
+            name: None,
+            reasoning_content: None,
+            tool_call_id: None,
+        });
+        engine.run(&mut step(), &mut ctx(), r).await.unwrap();
+        let msgs = seen.lock().unwrap();
+        assert_eq!(msgs.len(), 1, "ONE system message, never two");
+        assert!(matches!(&msgs[0].content[0], Content::Text { text }
+            if text.starts_with("SOUL") && text.contains("CELL-SYSTEM")));
     }
 
     #[tokio::test]

@@ -61,6 +61,12 @@ impl LocalLlama {
                     body.insert("json_schema".into(), other.clone());
                 }
             }
+            // constrained decode is incompatible with a thinking prefix: the grammar sampler
+            // starts at token one, and a template-emitted `<think>` empties the grammar stack
+            // (llama-server 400 — lived, D1 2026-07-09). A grammar-bearing step therefore forces
+            // thinking OFF, outranking any effort request — the two are mutually exclusive.
+            body.insert("chat_template_kwargs".into(), json!({ "enable_thinking": false }));
+            return Ok(Value::Object(body));
         }
         // thinking toggle (Qwen/llama-server): None = server default
         if let Some(enable) = thinking_enabled(&req.effort) {
@@ -170,6 +176,17 @@ mod tests {
         let js = t.build_body(&req_text("x", Effort::default(), Some(schema.clone()))).unwrap();
         assert_eq!(js["json_schema"], schema);
         assert!(js.get("grammar").is_none());
+    }
+
+    #[test]
+    fn a_grammar_forces_thinking_off_even_when_effort_asks_for_it() {
+        // constrained decode + a thinking prefix are mutually exclusive (the grammar sampler
+        // breaks on a template-emitted <think> — lived, D1 2026-07-09): grammar outranks effort.
+        let t = tier();
+        let body = t
+            .build_body(&req_text("x", Effort { n: 1, thinking: Some("high".into()) }, Some(json!({"type":"object"}))))
+            .unwrap();
+        assert_eq!(body["chat_template_kwargs"]["enable_thinking"], false);
     }
 
     #[test]
