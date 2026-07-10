@@ -18,10 +18,14 @@ deferred-with-triggers) + **C4/C5 closed** · **E2 passed**.
 
 ## Perpetual-polish mode (ROADMAP §4) — the standing loop now
 
-- **Polish item #1 (operator-gated): A5 privacy rung-3 + the C3 falsifier** (`ort`/ONNX, the
-  OpenAI privacy filter at `C:\models\privacy-filter`; ISSUE-2). Build behind `GOLDEN_PRIVACY`,
-  pre-register the C3 thresholds BEFORE measuring (the house template), additive-recall-only
-  (rungs 1–2 keep the guarantee).
+- **Polish item #1 — A5 privacy rung-3: PROVISIONED + DESIGNED (operator un-gated 2026-07-10);
+  the `ort` build is THE next focused session.** The brief = `docs/proposals/privacy-rung3.md`
+  (§4 build plan, §5 risks): model byte-verified at `C:\models\privacy-filter` (quantized-CPU
+  ONNX 1.62 GB + tokenizer.json + viterbi_calibration); `PiiClassifier` trait in keel-middleware,
+  ort impl behind a `privacy-model` feature in keel-services, additive-only, egress-only,
+  KEEL-owned Viterbi; **C3 thresholds already pre-registered** (golden case + ≥+0.30 recall +
+  ≤10% FP + ≤500 ms p95, else OFF-with-machinery-built). First build is minutes (onnxruntime
+  fetch) — stop keel-serve first; inspect the ONNX graph I/O before writing the runner.
 - Then, in any order, each a gated/banked/pushed slice: `/code-review` the tree → fix findings ·
   raise thin coverage · **falsifier re-checks with fresh data** (standing watches: `keel metrics`
   escalation "does not rise" + rework < 0.10; the flywheel triggers in
