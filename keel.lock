@@ -25,13 +25,19 @@ substrate:
     fallback: whisper-base.en                    # faster-than-realtime CPU default
     gate: vad                                    # transcribe only on voiced audio
   embedding:                                     # recall + cheap routing-classification — a Memory organ, NOT a tier
-    id: qwen3-embedding-0.6b-q8                    # capable local default (~1024-dim, sovereign-safe)
-    file: qwen3-embedding-0.6b-q8_0.gguf           # on-disk name under servers.models_dir (downloaded 2026-07-09; A7.3)
+    # C2 DECIDED 2026-07-10 (GOLDEN_RECALL v2, ratified): the MiniLM floor BEAT qwen3-embedding-0.6b
+    # as-built (raw-text queries, no instruct prefix) by +0.12 nDCG@10 / +0.12 recall@5, winning every
+    # family, 3x faster, better negative separation -> the floor IS the default. Re-open triggers:
+    # the Qwen3 instruct-prefix experiment, or a symmetric-hardening set pass. Fingerprint change
+    # auto-rebuilds sidecars from the ledger.
+    id: all-minilm-l6-v2                           # the "never blind" floor (384-dim, CPU-fast, sovereign-safe)
+    file: all-MiniLM-L6-v2-ggml-model-f16.gguf     # on-disk name under servers.models_dir (provisioned byte-exact 2026-07-10)
     port: 8090                                     # the embed llama-server's own port (the LLM owns :8080)
+    pooling: mean                                  # model-native pooling (MiniLM = mean; qwen3-embedding = last)
     sha256: TODO
-    dim: 1024                                      # fingerprinted into the index; mismatch => rebuild-from-ledger
+    dim: 384                                       # fingerprinted into the index; mismatch => rebuild-from-ledger
     disposition: shared                            # download-once system asset
-    fallback: all-minilm-l6-v2                     # 384-dim, embedded, CPU -> the "never blind" floor
+    fallback: qwen3-embedding-0.6b-q8              # the 1024-dim upgrade candidate (on disk; C2 re-open flips back)
     sovereign_forces: local                        # I3: sovereign/PHI text never embeds off-box; vectors stay local
     format_committing: true                        # the one substrate exception to tier-interchangeability (ADR #13)
   rerank:                                          # cross-encoder upgrade to Memory's rerank() sub-seam
@@ -41,6 +47,10 @@ substrate:
     sha256: TODO
     disposition: shared
     default: identity                              # SHIPS OFF (canon §11) — pass-through until GOLDEN_RECALL earns it on
+    # C1 DECIDED 2026-07-10 (GOLDEN_RECALL v2, ratified): identity STAYS - reranker uplift +0.070
+    # recall@5 < the 0.10 ratified threshold (nDCG +0.111 recorded; zero regressions; p95 594 ms).
+    # KEEL injects top-k wholesale, so presence beats ordering; not worth a third managed server.
+    # Re-open triggers: organic recall misses in lived use, or a recall_k=1 usage pattern.
   privacy:                                         # I3 mask, rung 3 — recall verification-pass (NOT the guarantee)
     id: openai-privacy-filter                      # bidirectional token-classifier (BIOES span head), 50M active / ~1.5B total, Apache-2.0
     sha256: TODO

@@ -1,7 +1,7 @@
 # The golden-recall set — C1/C2 design (proposal for operator review)
 
-*Authored 2026-07-10. Status: PROPOSED — the set draft + bench harness are built and gated; no
-measurement is decision-grade until the operator ratifies the set (flips `ratified: true`).*
+*Authored 2026-07-10. Status: **CLOSED — ratified + both falsifiers DECIDED same day** (§9). The
+sections below are kept as the design record.*
 
 ## 1 · What this decides, and against what
 
@@ -210,3 +210,34 @@ threshold choice at ratification is the real C1 policy call:
 - keep 0.10 and note the nDCG evidence in the WORKLOG decision either way.
 The agent deliberately does NOT pre-pick this — it is exactly the "operator-authored ground truth"
 the design review exists for. (The C2 leg is unchanged: blocked only on the MiniLM download.)
+
+## 9 · DECISION RECORD (2026-07-10, operator delegation: "proceed for all at your recommendation")
+
+The set was **ratified at v2 with the thresholds kept as pre-registered** (0.10 / 0.05 / 0.70 /
+1500) — the recommendation explicitly refused to move a bar after seeing a number in the direction
+that flips an outcome. MiniLM f16 was provisioned byte-exact (45,949,216 B). Three decision-grade
+legs ran on the ratified set (artifacts: `.keelstate/bench/recall-*.json`).
+
+**C1 — reranker vs identity: OFF (identity stays).** Uplift +0.070 recall@5 < 0.10 (nDCG@10
++0.111, MRR +0.087, zero regressions, p95 594 ms recorded). KEEL injects top-k memories wholesale,
+so presence beats ordering, and the presence gain doesn't buy a permanent third managed server +
+~0.5 s on every assemble. The `Rerank` seam/adapter/bench stay built; a cell can wire them.
+Re-open: organic recall misses in lived use, or a `recall_k=1` pattern.
+
+**C2 — embedder vs the MiniLM floor: the FLOOR takes the default (falsifier trip — the expected
+direction inverted).** On the as-built pipeline (raw queries, live-shaped texts) MiniLM-L6-v2 f16
+beat Qwen3-Embedding-0.6B-Q8 in **every family**: recall@5 0.906 vs 0.786, nDCG@10 0.840 vs 0.718
+(Qwen3 uplift over the floor = **−0.122** vs the +0.05 bar), episodic +0.25, traps +0.14, 3× faster
+(p50 5 ms), better negative separation (0.29–0.49 vs 0.44–0.69). **Flip executed + lived:**
+keel.lock → minilm/384/`pooling: mean` (pooling config-driven through manifest + lifecycle);
+fingerprint flip cleared + rebuilt sidecars from the ledger (0→30 vecs, 384-dim, by artifact);
+write-side dim-guard added (a stale wrong-model server can never fossilize vectors); embed input
+head-capped at 1500 chars (MiniLM's 512-token window; stored text stays full). Caveats recorded:
+trap clusters were adversarially selected against Qwen3's rankings (the floor's win is broad-based
+across untuned families regardless), and Qwen3 ran without its instruct-prefix query format.
+Re-open: the instruct-prefix experiment · a symmetric-hardening set pass. Qwen3 stays on disk as
+the lock `fallback`.
+
+Both decisions, rationale, and re-open triggers are also annotated in `keel.lock` and recorded in
+the WORKLOG. `GOLDEN_RECALL` is now fully accounted for: the deterministic case is CI-green, the
+two uplift cases are measured-and-decided (conformance-coverage.md updated).

@@ -13,7 +13,7 @@ where the gaps are. **Map, not gospel — verify against `tests/golden/golden.js
 | `oracle` | Oracle / I5 (§10) | `verifier` + `SchemaOracle`/`PropertyOracle`/`GoldenDispatchOracle` | the joint-wrong detector |
 | `perception` | PerceptionSource (§12) | `perception::tests::passes_golden_perception` | dHash + VAD change-gate |
 | `privacy` | I3 (§5.1) | `privacy::tests` (rung-2 mirrors GOLDEN_PRIVACY) | deterministic redactor; rung-3 model = A5 (behind GOLDEN_PRIVACY) |
-| `recall` | Memory recall / Ring-4 (§11) | **conformance-ahead — green when A3 lands** | embedder + `sqlite-vec` index; format-committing (ISSUE-1) |
+| `recall` | Memory recall / Ring-4 (§11) | `recall::tests::passes_golden_recall_fingerprint` (A3) + the two **uplift cases MEASURED + DECIDED 2026-07-10** on the ratified `golden-recall` set via `keel recall-bench` (C1 reranker OFF · C2 floor-default) | brute-force cosine (ISSUE-1: no `sqlite-vec`); format-committing fingerprint |
 
 The freeze-gate (`keel-contracts/tests/golden_freeze.rs::goldens_match_the_frozen_hash`) makes the set
 itself a non-model assertion — any change fails the build → fix the code, never the golden.
@@ -41,8 +41,10 @@ language-neutral *I/O* to freeze, only a shape):
 
 ## Verdict
 The golden set is a **complete behavioral conformance layer** for the joints that have language-neutral
-I/O (router, tier, oracle, perception, privacy, and recall once A3 lands). Structural joints (Spine,
+I/O (router, tier, oracle, perception, privacy, recall). Structural joints (Spine,
 Driver, TraceSink, Memory-mechanics, Middleware) carry no golden by design — a port re-passes their unit
-tests. **Only documented gap: `recall` is conformance-ahead until A3, and `ToolHost` is unbuilt until the
-first cell (D3).** A C/C++ port that re-passes the 6 golden families + re-implements the structural unit
-tests is conformance-complete. *(Revisit when A3 turns `recall` green and when D3 lands ToolHost.)*
+tests. **Only documented gap: `ToolHost` is unbuilt until the first cell pulls it (D3).** `recall` closed
+2026-07-10: the deterministic case is CI-green (A3) and the two uplift cases are measured + decided on the
+ratified `golden-recall` set (C1 reranker OFF · C2 floor takes the embed default; a port re-runs
+`keel recall-bench` against the same set). A C/C++ port that re-passes the 6 golden families +
+re-implements the structural unit tests is conformance-complete. *(Revisit when D3 lands ToolHost.)*

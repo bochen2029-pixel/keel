@@ -54,7 +54,7 @@ pub const EMBED_LOG: &str = ".keelstate/embed-server.log";
 
 /// Resolve the embed substrate (canon §11/§13, the `embedded_tiny` resolver rung): probe the
 /// configured embed port for a *ready* server, else cold-start one from `keel.lock` (its own
-/// llama-server — `--embeddings --pooling last`; the ISSUE-8 handle discipline via a file log).
+/// llama-server — `--embeddings --pooling <keel.lock>`; the ISSUE-8 handle discipline via a file log).
 /// **Graceful:** any failure returns `None` — memory degrades to Ring-0/2/3 with one stderr note;
 /// a turn is never blocked on the embedder.
 fn resolve_embedder(manifest: &Manifest) -> Option<(Arc<keel_adapters::Embedder>, keel_services::Fingerprint)> {
@@ -71,7 +71,7 @@ fn resolve_embedder(manifest: &Manifest) -> Option<(Arc<keel_adapters::Embedder>
         let mut cfg = keel_kernel::LlamaServerConfig::new(exe, model);
         cfg.port = e.port;
         cfg.embedding = true;
-        cfg.pooling = Some("last".into());
+        cfg.pooling = Some(e.pooling.clone());
         cfg.ctx_size = 4096; // an embedder needs no chat-sized context
         cfg.log_path = Some(EMBED_LOG.to_string());
         cfg.startup_timeout_secs = 60;

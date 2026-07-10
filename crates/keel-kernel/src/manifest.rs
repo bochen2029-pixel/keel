@@ -139,10 +139,20 @@ pub struct EmbeddingCfg {
     pub dim: usize,
     #[serde(default = "default_embed_port")]
     pub port: u16,
+    /// llama-server `--pooling` for this model (model-native: MiniLM = `mean`, Qwen3-Embedding =
+    /// `last`). Config-driven since the C2 flip — the default keeps pre-flip locks working.
+    #[serde(default = "default_embed_pooling")]
+    pub pooling: String,
 }
 impl Default for EmbeddingCfg {
     fn default() -> Self {
-        Self { id: String::new(), file: String::new(), dim: default_embed_dim(), port: default_embed_port() }
+        Self {
+            id: String::new(),
+            file: String::new(),
+            dim: default_embed_dim(),
+            port: default_embed_port(),
+            pooling: default_embed_pooling(),
+        }
     }
 }
 fn default_embed_dim() -> usize {
@@ -150,6 +160,9 @@ fn default_embed_dim() -> usize {
 }
 fn default_embed_port() -> u16 {
     8090
+}
+fn default_embed_pooling() -> String {
+    "last".into()
 }
 
 /// The rerank organ (keel.lock `substrate.rerank`, canon §11 — a Memory organ, NOT a tier). Ships
@@ -526,12 +539,14 @@ router:
         assert!(m.llama_exe().unwrap().ends_with("llama-server.exe"));
         assert!(m.llm_model_path().unwrap().ends_with("Qwen3.5-9B-Q5_K_M.gguf"));
         assert!(m.llm_mmproj_path().unwrap().ends_with("mmproj-F16.gguf"));
-        // A7.3: the embed organ is keel.lock-driven (its own server on its own port; fingerprint id+dim)
-        assert_eq!(m.substrate.embedding.id, "qwen3-embedding-0.6b-q8");
-        assert_eq!(m.substrate.embedding.file, "qwen3-embedding-0.6b-q8_0.gguf");
-        assert_eq!(m.substrate.embedding.dim, 1024);
+        // A7.3: the embed organ is keel.lock-driven (its own server on its own port; fingerprint id+dim).
+        // C2 DECIDED 2026-07-10: the MiniLM floor took the default (pooling is config-driven since the flip).
+        assert_eq!(m.substrate.embedding.id, "all-minilm-l6-v2");
+        assert_eq!(m.substrate.embedding.file, "all-MiniLM-L6-v2-ggml-model-f16.gguf");
+        assert_eq!(m.substrate.embedding.dim, 384);
         assert_eq!(m.substrate.embedding.port, 8090);
-        assert!(m.embed_model_path().unwrap().ends_with("qwen3-embedding-0.6b-q8_0.gguf"));
+        assert_eq!(m.substrate.embedding.pooling, "mean");
+        assert!(m.embed_model_path().unwrap().ends_with("all-MiniLM-L6-v2-ggml-model-f16.gguf"));
         // C1 (recall-bench rerank leg): the rerank organ is keel.lock-driven (its own server + port)
         assert_eq!(m.substrate.rerank.id, "qwen3-reranker-0.6b-q8");
         assert_eq!(m.substrate.rerank.port, 8091);

@@ -184,7 +184,14 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   Corpus scrubbed at write (B2) ⇒ export carries no secret. LoRA training stays external (Unsloth). +3 tests.
 
 ### Phase C — the §23 falsifiers (check + DECIDE each; a decision is the deliverable)
-- `[?] C1` reranker vs identity on `GOLDEN_RECALL` → keep OFF or turn ON. (after A3) — **STATUS
+- `[x] C1` reranker vs identity on `GOLDEN_RECALL` → **DECIDED 2026-07-10: OFF (identity stays).**
+  Ratified-set decision run: reranker uplift **+0.070 recall@5 < the 0.10 ratified threshold**
+  (nDCG@10 +0.111 and MRR +0.087 recorded; zero regressions; rerank p95 594 ms ≤ budget). Rationale:
+  KEEL injects top-k memories wholesale, so presence-in-top-k is the operative measure and ordering
+  is secondary; the marginal presence gain doesn't buy a permanent third managed server + ~0.5 s
+  p95 on every assemble. The seam + adapter + bench stay built — a cell can wire `Rerank` itself.
+  **Re-open triggers:** organic recall misses in lived use · a `recall_k=1` usage pattern.
+  keel.lock `rerank.default: identity` annotated. *(History below.)* — was `[?]`: **STATUS
   2026-06-15:** the embed organ + brute-force cosine recall + fingerprint golden are built (A3); the
   recall@k **uplift** benchmark needs the embed model served + a labeled set. ~~HARD BLOCKER: the
   Qwen3-Embedding-0.6B GGUF is NOT in `C:\models`~~ → ISSUE-10 **RESOLVED 2026-07-09** (downloaded +
@@ -208,11 +215,20 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   gains — the operator ratifies the threshold (0.10 vs 0.05) WITH the set (proposal §8).
   **Remaining:** ISSUE-11 ratification → the decision run → DECIDE ON/OFF. Ring-4 rerank wiring +
   lifecycle launch ONLY if ON.
-- `[?] C2` embedder vs the MiniLM floor → keep floor or upgrade. (after A3) — same design + harness as
-  C1 (one more `recall-bench` run against a MiniLM-served `:8090`; nDCG@10 uplift ≥ 0.05 keeps Qwen3
-  as default, else the floor takes it — a keel.lock config flip either way; the fingerprint guard
-  auto-rebuilds sidecars). **Blocker: the `all-MiniLM-L6-v2` GGUF is not in `C:\models`** (it IS the
-  keel.lock-pinned fallback) — provisioning is on ISSUE-11's operator list (~25–45 MB, Apache-2.0).
+- `[x] C2` embedder vs the MiniLM floor → **DECIDED 2026-07-10: the FLOOR takes the default (a
+  falsifier trip — the expected direction inverted).** MiniLM-L6-v2 f16 (384-dim, 45 MB, provisioned
+  byte-exact) **beat Qwen3-Embedding-0.6B-Q8 in every family** on the ratified set: recall@5 0.906
+  vs 0.786, nDCG@10 0.840 vs 0.718 (Qwen3's uplift over the floor = **−0.122**, vs the +0.05 bar),
+  episodic +0.25, traps +0.14, 3× faster (p50 5 ms), better negative-control separation (0.29–0.49
+  vs 0.44–0.69). **Flip executed + LIVED** (blast radius exactly one adapter, §23): keel.lock
+  `embedding` → minilm/384/`pooling: mean` (pooling now config-driven through manifest+lifecycle);
+  fingerprint flip cleared + rebuilt the sidecars from the ledger on the next call (0→30 vecs,
+  384-dim, verified by artifact); write-side **dim-guard** added (a stale wrong-model embed server
+  can never fossilize vectors); embed input head-capped at 1500 chars (the MiniLM 512-token window;
+  stored text stays full). **Caveats recorded:** the trap clusters were adversarially selected
+  against Qwen3's rankings (but the floor wins the untuned families broadly), and Qwen3 ran as-built
+  (no instruct-prefix queries). **Re-open triggers:** the Qwen3 instruct-prefix experiment · a
+  symmetric-hardening set pass. Qwen3 stays on disk as the lock `fallback`.
 - `[?] C3` privacy model vs deterministic-only on `GOLDEN_PRIVACY`. (after A5)
 - `[~] C4` `rework_rate` < 10% with oracles on — **PRELIM PASS 2026-06-15:** rework_rate **0.056 (5.6%)**
   over 18 live turns, oracles on → under 10%. ✓ (Small N; revisit with more daemon data.)
@@ -338,20 +354,14 @@ with common sense, never ask" directive, chose **mask-all-output** (state-hygien
   --pooling last` on :8090 (bounded, file-redirected, killed — the ISSUE-8 pattern) served
   `/v1/embeddings` → a **1024-dim** vector, matching the keel.lock `dim: 1024` pin. C1/C2/A3-live/
   Ring-4-live are now unblocked (each still needs its focused live session).
-- **ISSUE-11 [operator-review] — ratify the golden-recall set + provision the C2 floor.** The C1/C2
-  benchmark set `tests/recall/golden-recall.json` is DRAFTED (`ratified:false`) + the harness is
-  built + gated (2026-07-10; design: `docs/proposals/golden-recall-set.md`). Operator: (1) edit
-  docs/queries/labels/**thresholds** freely, flip `ratified:true` + `ratified_by`/`date` (a
-  structural-only lint guards coherence in CI — content edits can never break the gate);
-  (2) authorize/download `all-MiniLM-L6-v2` GGUF (~25–45 MB, Apache-2.0, already the keel.lock
-  `embedding.fallback`) into `C:\models` for the C2 leg — or say the word and a session does it;
-  ~~(3) contingent rerank-GGUF re-provision~~ **RETIRED 2026-07-10** — the step-0 smoke PASSED live
-  (`--reranking` loads it; `/v1/rerank` scores correctly). ~~(0) v2 hardening~~ **DONE 2026-07-10**
-  (operator go): 108 docs / 41 queries, identity baseline 0.786 (in-window), draft rerank uplift
-  +0.070 recall@5 / +0.111 nDCG@10. **What's left is exactly (1) + (2): ratify the set — including
-  the C1 threshold call (0.10 → OFF vs 0.05 → ON; proposal §8 lays out the evidence) — and drop
-  the MiniLM GGUF for C2.** Unblocks: the decision run → the two DECISIONS. Until then
-  `keel recall-bench` runs DRAFT-stamped (usable for smoke, never for the decision).
+- **ISSUE-11 — RESOLVED 2026-07-10** (operator grant: "go ahead and fetch the MiniLM GGUF, yes and
+  proceed for all at your recommendation"). (0) v2 hardening DONE · (1) set **RATIFIED v2** under
+  the recorded delegation, thresholds kept as pre-registered (0.10/0.05/0.70/1500 — the
+  moving-the-bar-after-the-number trap explicitly avoided) · (2) MiniLM GGUF **provisioned
+  byte-exact** (45,949,216 B, second-state f16) · (3) rerank-GGUF contingency retired earlier.
+  Decision runs executed → **C1 DECIDED OFF · C2 DECIDED floor-default** (see the C1/C2 entries;
+  artifacts in `.keelstate/bench/`; decisions + rationale + re-open triggers in WORKLOG + keel.lock
+  annotations).
 - *(Append new issues as discovered, each: `ISSUE-N [type] — description · what unblocks it`. If the
   loop STALLS — only `[G]`/`[!]`/`[?]` slices remain and none can advance — write `.keelstate/STALLED`
   with the reason so the supervisor stops respawning, and the operator resolves the queue on next look.)*

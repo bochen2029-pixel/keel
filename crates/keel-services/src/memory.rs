@@ -48,6 +48,10 @@ use std::sync::{Arc, Mutex};
 /// falsifier: if lived runs overflow the window despite the caps, add a real tokenizer).
 const CHARS_PER_TOKEN: usize = 4;
 
+/// Cap on chars sent to the embed organ (~375 tokens at the 4-chars/token proxy) — safely under a
+/// MiniLM-class 512-token window (the C2-decided floor embedder), and bounded work on any model.
+const EMBED_INPUT_MAX_CHARS: usize = 1500;
+
 /// A ring's char cap from its token budget; `0` tokens = **uncapped** (the explicit opt-out).
 fn chars_cap(tokens: u32) -> Option<usize> {
     (tokens > 0).then_some(tokens as usize * CHARS_PER_TOKEN)
@@ -137,6 +141,11 @@ pub struct FileMemory {
     ring2_conversation: bool,
     /// How many semantically-relevant earlier turns Ring-4 injects (0 = off).
     recall_k: usize,
+    /// The embedder fingerprint's vector dim (0 = no embedder) — the write-side guard: a vector
+    /// from a mismatched embed server (server model ≠ keel.lock, e.g. a stale process still on the
+    /// configured port after a C2 default flip) is never stored. Reads are safe by construction
+    /// (`cosine` returns 0.0 on a length mismatch and the relevance floor blocks zero-scores).
+    fp_dim: usize,
     /// A7.1 — the per-ring context budget (canon §7 "ringed + budgeted"; REEL §4.7). Declared in
     /// tokens (the frozen `TokenBudget`), enforced in chars (~4/token). Ring-0 is **never** trimmed
     /// (identity protection, REEL §3.4) — its field is informational. `0` on a ring = uncapped.
@@ -168,6 +177,7 @@ impl FileMemory {
             recall_window: 4096,
             backfill: 32,
             recall_k: 0,
+            fp_dim: 0,
             budget: Self::default_budget(),
             exemplars_file,
             ring2_conversation: false,
@@ -258,12 +268,29 @@ impl FileMemory {
         }
         self.embedder = Some(embedder);
         self.recall_k = recall_k;
+        self.fp_dim = fp.dim;
         self
     }
 
+    /// The slice of `text` actually sent to the embed organ — head-capped so a long turn still
+    /// embeds under a MiniLM-class 512-token window (the stored/injected text stays full).
+    fn embed_input(text: &str) -> &str {
+        take_chars(text, EMBED_INPUT_MAX_CHARS)
+    }
+
     /// Append a `{text, vec}` line to a vector sidecar (best-effort; recall is non-critical, so a
-    /// sidecar write never fails a turn — the lossless Tape is the system of record).
+    /// sidecar write never fails a turn — the lossless Tape is the system of record). A vector
+    /// whose dim doesn't match the fingerprint is **dropped loudly** — it came from a mismatched
+    /// embed server (server ≠ keel.lock), and storing it would fossilize wrong-model neighbors.
     fn append_vec_line(&self, path: &Path, text: &str, vec: &[f32]) {
+        if self.fp_dim != 0 && vec.len() != self.fp_dim {
+            eprintln!(
+                "[keel] ring-4: dropped a {}-dim vector (fingerprint expects {}) - a stale embed server may be running on the configured port",
+                vec.len(),
+                self.fp_dim
+            );
+            return;
+        }
         let line = serde_json::json!({ "text": text, "vec": vec }).to_string();
         let _g = self.lock.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(dir) = path.parent() {
@@ -313,7 +340,7 @@ impl FileMemory {
             let seed = self.recent_traces(self.backfill);
             for t in &seed {
                 let s = Self::summarize(t);
-                if let Ok(v) = embedder.embed_text(&s).await {
+                if let Ok(v) = embedder.embed_text(Self::embed_input(&s)).await {
                     self.append_vec(&s, &v);
                 }
             }
@@ -321,7 +348,7 @@ impl FileMemory {
         if !self.epvecs.exists() {
             for ep in self.read_episodes(usize::MAX) {
                 let s = ep.text();
-                if let Ok(v) = embedder.embed_text(&s).await {
+                if let Ok(v) = embedder.embed_text(Self::embed_input(&s)).await {
                     self.append_vec_line(&self.epvecs.clone(), &s, &v);
                 }
             }
@@ -518,7 +545,7 @@ impl FileMemory {
     async fn embed_episode(&self, ep: &Episode) {
         if let Some(embedder) = &self.embedder {
             let s = ep.text();
-            if let Ok(v) = embedder.embed_text(&s).await {
+            if let Ok(v) = embedder.embed_text(Self::embed_input(&s)).await {
                 self.append_vec_line(&self.epvecs.clone(), &s, &v);
             }
         }
@@ -838,7 +865,7 @@ impl Memory for FileMemory {
                     Content::Text { text } if !text.trim().is_empty() => Some(text.trim()),
                     _ => None,
                 }) {
-                    if let Ok(qv) = embedder.embed_text(query).await {
+                    if let Ok(qv) = embedder.embed_text(Self::embed_input(query)).await {
                         let recent_set: std::collections::HashSet<&String> = ring2.iter().collect();
                         let mut scored: Vec<(f32, String)> = self
                             .recall_candidates()
@@ -950,7 +977,7 @@ impl Memory for FileMemory {
         // so an embed failure never fails the turn; the lossless Tape already holds the record).
         if let Some(embedder) = &self.embedder {
             let summary = Self::summarize(trace);
-            if let Ok(vec) = embedder.embed_text(&summary).await {
+            if let Ok(vec) = embedder.embed_text(Self::embed_input(&summary)).await {
                 self.append_vec(&summary, &vec);
             }
         }
@@ -1177,6 +1204,44 @@ mod tests {
             };
             Ok(v)
         }
+    }
+
+    /// A stub that emulates a STALE embed server: it returns vectors of the wrong dimension
+    /// (server model ≠ the keel.lock fingerprint — the C2-flip sharp edge).
+    struct WrongDimEmbed;
+    #[async_trait]
+    impl Embed for WrongDimEmbed {
+        async fn embed_text(&self, _text: &str) -> Result<Vec<f32>> {
+            Ok(vec![0.5; 8])
+        }
+    }
+
+    #[tokio::test]
+    async fn mismatched_dim_vectors_are_never_stored() {
+        let tape = temp_tape("dimguard");
+        clean_ring4(&tape);
+        // fingerprint says 3-dim; the "server" returns 8-dim → the write guard drops every vector.
+        let mem = FileMemory::new("", &tape, 2).with_embedder(Arc::new(WrongDimEmbed), Fingerprint::new("stub", 3), 1);
+        mem.record(&trace("the capital of France?", "Paris")).await.unwrap();
+        let sidecar = vec_path_for(&tape);
+        assert!(
+            !sidecar.exists() || std::fs::read_to_string(&sidecar).unwrap().trim().is_empty(),
+            "a wrong-dim vector must never land in the sidecar"
+        );
+        // the same record through a matching-dim embedder stores fine (the guard is dim-keyed, not off).
+        let mem_ok = FileMemory::new("", &tape, 2).with_embedder(Arc::new(StubEmbed), Fingerprint::new("stub", 3), 1);
+        mem_ok.record(&trace("the capital of France?", "Paris")).await.unwrap();
+        assert!(!std::fs::read_to_string(vec_path_for(&tape)).unwrap().trim().is_empty());
+        let _ = std::fs::remove_file(&tape);
+        clean_ring4(&tape);
+    }
+
+    #[test]
+    fn embed_input_is_head_capped_for_small_window_models() {
+        let short = "a normal turn";
+        assert_eq!(FileMemory::embed_input(short), short, "short text passes through whole");
+        let long = "x".repeat(EMBED_INPUT_MAX_CHARS + 500);
+        assert_eq!(FileMemory::embed_input(&long).chars().count(), EMBED_INPUT_MAX_CHARS);
     }
 
     fn clean_ring4(tape: &Path) {

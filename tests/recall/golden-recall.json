@@ -1,9 +1,9 @@
 {
   "name": "golden-recall",
   "version": 2,
-  "ratified": false,
-  "ratified_by": null,
-  "ratified_date": null,
+  "ratified": true,
+  "ratified_by": "Bo Chen (operator; ratification + threshold call delegated 2026-07-10: 'proceed for all at your recommendation' - thresholds kept as pre-registered)",
+  "ratified_date": "2026-07-10",
   "notes": "The operator-ratified labeled set behind GOLDEN_RECALL's two uplift cases (C1 reranker-vs-identity, C2 embedder-vs-floor). DRAFT until the operator edits/approves and flips `ratified`. v2 = the hardening pass (proposal s7 Remedy A): the corpus grew 42->108 docs with near-topic confusable clusters around the hard queries so identity recall@5 has headroom (v1 saturated at 0.975); queries grew 30->41 (36 scored + 5 negative controls). All content is FICTIONAL (the repo is public); doc texts mirror the live Ring-4 shapes exactly (FileMemory::summarize turn entries, Episode::text digests). This file is NOT part of the frozen golden.json seal - golden.json references it by name (\"set\": \"golden-recall\"). Grades: 2 = directly answers, 1 = partially relevant, absent = irrelevant. Design: docs/proposals/golden-recall-set.md.",
   "thresholds": {
     "c1_recall_at_5_uplift": 0.10,
