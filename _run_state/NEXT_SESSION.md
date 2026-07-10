@@ -11,13 +11,14 @@
 `cargo test` (PowerShell, from `C:\KEEL`) → **178 passed / 7 ignored / 0 failed**, clippy
 **0 warnings whole-tree**, seal `db4377b3` green.
 
-Four slices in one day: **(1)** C1/C2 design + harness (`73430c7` + smoke `cdca9e6`) · **(2)**
+Five slices in one day: **(1)** C1/C2 design + harness (`73430c7` + smoke `cdca9e6`) · **(2)**
 golden-recall **v2 hardening** measured to convergence (`f2c1dd3`) · **(3)** set **RATIFIED** +
 MiniLM provisioned + the decision legs → **C1 OFF · C2 floor-default (falsifier trip!) + the flip
 lived** (`76845dd`, ISSUE-11 resolved) · **(4)** **B1 amplify BUILT clamped-OFF + DECIDED OFF**
-(ISSUE-4 resolved: uplift +0.115 < the pre-registered 0.15 bar; the §8 `amplify?` loop is real in
-`kernel::engine` behind `router.amplify_n: 1`, gated to local critical/ref'd steps with a
-discriminating-oracle guard; the 25-task deterministic set + `keel amplify-bench` are the harness).
+(`72a74ef`, ISSUE-4 resolved: uplift +0.115 < the pre-registered 0.15 bar; the §8 `amplify?` loop
+is real in `kernel::engine` behind `router.amplify_n: 1`) · **(5)** **D2 SEXTANT SCOPED + SEEDED**
+(the D1 pattern: boundary map `docs/proposals/sextant-on-keel.md`; repo `C:\SEXTANT` git-init'd
+`ea5b9ed`, LOCAL-ONLY; D3/ToolHost timing decided = S4; S0 keystone is the next build).
 
 ## Session-specific state the standing docs don't carry
 
@@ -42,21 +43,28 @@ discriminating-oracle guard; the 25-task deterministic set + `keel amplify-bench
 - **The `nul` junk file** reappears after cargo runs; `cmd /c del "\\?\C:\KEEL\nul"` (a
   path-protection hook may block it — then just leave it; it's untracked and unstaged).
 - **NightScribe repo** (`C:\ClaudeCode\photo2deck`) is still LOCAL-ONLY (no remote).
+- **SEXTANT repo** (`C:\SEXTANT`, `ea5b9ed`) is LOCAL-ONLY (no remote — operator adds one if
+  wanted; the gitignore keeps Canon/PII out regardless).
 - **A7 honest residual** (unchanged): cold-eyes single-judge recall on adversarial plants is
   stochastic on the 9B; 2-of-3 vote in place; upgrade trigger = a stronger local judge.
 
 ## The queue (ROADMAP order; first unblocked `[ ]`/`[?]` wins)
 
-1. **B3/ISSUE-5 — flywheel ignition:** out-of-band LoRA (Unsloth) over the exported corpus;
-   measure the `escalation_rate` trend (flat is an acceptable *decided* outcome). Out-of-band +
-   likely operator-present; if gated, route to:
-2. **D2 — SEXTANT** (the canon's named first cell) + **D3 — ToolHost** (pulled by D2; the last
-   conformance-coverage gap). The next major build effort — best begun fresh (the D1 pattern).
+1. **D2/SEXTANT S0 — the keystone build** (fresh session, the scope is done): read
+   `docs/proposals/sextant-on-keel.md` + `C:\SEXTANT\README.md` + SPEC §6/§11/§12 first. Build
+   the Python package (`C:\SEXTANT\sextant\`): Canon loader + `sextant tailor <jd-file>` — one
+   grammar-forced tailoring turn over serve `:7070` (`sovereign:true`, schema per SPEC §12) →
+   client gate rungs 1–4 → DOCX (`python-docx`) → PDF (Word COM `SaveAs 17`, Edge-headless
+   fallback; NO Playwright). Lived = a gate-clean tailored PDF+DOCX from a real JD in <10 s.
+   Needs: a filled `canon/profile.json` + `cv.md` (**operator input** — template committed; a
+   FICTIONAL canon works for the dry-run if the operator hasn't authored his yet). Then **S1**
+   (5 real postings → dossiers) = the D2 boundary verdict.
+2. **B3/ISSUE-5 — flywheel ignition:** out-of-band LoRA (Unsloth) over the exported corpus;
+   measure the `escalation_rate` trend (flat is an acceptable *decided* outcome).
 3. **A5 — privacy rung-3** (`ort`/ONNX) — operator's explicit LAST. Then **C3**.
-4. **E2 — the DONE review** — after today the falsifier scorecard reads: C1 ✓ C2 ✓ B1 ✓ (all
-   pre-registered + decided) · C4/C5 prelim-passed (small N; re-check with fresh daemon data) ·
-   C3 pending A5 · B3 pending the LoRA run. Remaining for DONE: B3-decided, A5+C3, D2 (or D1
-   suffices per §3), ISSUE-6 pins, the completion account.
+4. **E2 — the DONE review** — scorecard: C1 ✓ C2 ✓ B1 ✓ (pre-registered + decided) · C4/C5
+   prelim-passed · C3 pending A5 · B3 pending the LoRA run · D2 verdict renders at S1.
+   **D3/ToolHost lands at SEXTANT S4** (decided — `.eml` staging until then; vet `rmcp` there).
 
 **Operator-only ISSUES open:** ISSUE-6 (`sha256:` pins → then `kernel::lock` verify) · the Fable-5
 v0.3.0 hindsight ruling (piecemeal, non-blocking) · autonomy re-grant (sessions run SUPERVISED

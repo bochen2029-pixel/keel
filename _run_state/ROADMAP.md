@@ -281,12 +281,27 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   · MP4 import (ffmpeg) · minutes synthesis (map-reduce at slide boundaries — a domain prompt chain) ·
   GUI/tray · the golden-meeting eval. **Done =** those KEEL pieces come unchanged; only the periphery is
   written. If the cell forces a kernel/contract edit → KEEL's boundary is wrong, fix KEEL first.
-- `[ ] D2` · **SEXTANT on KEEL** (the canon first cell) — done = Conductor (`engine`) / Router /
+- `[~] D2` · **SEXTANT on KEEL** (the canon first cell) — done = Conductor (`engine`) / Router /
   Gate (Truth Gate `Oracle`, `INSUFFICIENT_SOURCE`→human) / Canon (factual `Memory`) / State (`Store`)
   / ToolHost (Gmail MCP) / vision retina — **all from KEEL unchanged**; only job-domain periphery.
   **If a cell forces a kernel/contract edit → KEEL's boundary is wrong: FIX KEEL FIRST** (a §23 trip).
+  **SCOPED 2026-07-10 (the D1 pattern — scope slice, then fresh-session builds):** the full
+  joint-by-joint map from `C:\SEXTANT\SPEC.md` (v0.1, pre-KEEL) onto as-built KEEL lives in
+  **`docs/proposals/sextant-on-keel.md`** — consumption = Python over protocol (canon §16); the
+  spec's own router/§16, conductor-per-turn/§15, gate-teeth/§11, run-state/§9 are superseded by
+  KEEL; deterministic gate rungs + domain DB + approval UX stay periphery (the D1 rule). Repo
+  seeded: `C:\SEXTANT` git-init'd (`ea5b9ed`, LOCAL-ONLY) — README + Canon/directive templates +
+  gitignore (Canon/PII never in git). **Build phases: S0 keystone** (`sextant tailor <jd>` →
+  grammar-forced tailoring turn → client gate → DOCX+PDF via Word COM/Edge, lived) → **S1 vertical
+  slice** (5 real postings → staged dossiers) **← the D2 boundary verdict renders at S1**; S2–S4
+  (discovery/conductor/dispatch) continue as the cell's product roadmap. Operator inputs wanted
+  before S1 lives: author the real Canon (`canon/profile.json` + `cv.md` from the template) —
+  everything else has decided defaults (proposal §5).
 - `[ ] D3` · **`ToolHost` (MCP) adapter** — a §3 protocol bet, unbuilt; **pulled by D2** (SEXTANT's
   Gmail MCP). Build when the cell needs it. **New dep:** an MCP client crate (vet at the time).
+  **TIMING DECIDED 2026-07-10:** lands at **SEXTANT S4 (dispatch)** — the spec's own last phase;
+  until then `.eml` staging serves email dispatch (zero deps, approval-gated anyway). Candidate
+  crate `rmcp` (the official Rust MCP SDK) — vet at S4. Fly-before-build (§22) — not before.
 - *(The Backrooms Director at `C:\backrooms` is the parallel dogfood **consumer** over `serve_openai`
   — NOT a cell; it can start anytime and does not block D1/D2.)*
 
