@@ -281,7 +281,20 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   · MP4 import (ffmpeg) · minutes synthesis (map-reduce at slide boundaries — a domain prompt chain) ·
   GUI/tray · the golden-meeting eval. **Done =** those KEEL pieces come unchanged; only the periphery is
   written. If the cell forces a kernel/contract edit → KEEL's boundary is wrong, fix KEEL first.
-- `[~] D2` · **SEXTANT on KEEL** (the canon first cell) — done = Conductor (`engine`) / Router /
+- `[x] D2` · **SEXTANT on KEEL — THE BOUNDARY VERDICT: PASS (2026-07-10, S1 lived).** S0+S1 built
+  and lived on REAL postings (5 live Greenhouse JDs → full Dossiers + the manifest approval
+  surface in 4.0 min, $0, nothing sent): **ZERO KEEL-side changes of ANY kind were forced — not
+  contract, not kernel, not adapter, not even app-layer** (cleaner than D1's three legal-layer
+  fixes; the cell consumed `serve_openai` + the embed organ exactly as shipped). Genome surface
+  exercised end-to-end: sovereign→local routing (I3 enforced by the router on every Canon-bearing
+  turn) · grammar-forced decode (12+ live turns, all schema-valid) · the embed organ (gate rung 5,
+  C2-calibrated threshold) · A7 memory + Tape/audit riding every turn · the three-tier economy
+  (all-local, $0). **The Truth Gate lived P8 on real data:** one dossier REJECTED after the
+  bounded retry (invented numbers in cover/strategy → documents withheld → human); poor-fit roles
+  accumulated honest `insufficient_source` flags instead of fabricated qualifications. Cell:
+  `C:\SEXTANT` `df7c7c5` (20 offline tests). S2–S4 (discovery breadth/conductor/dispatch→D3)
+  continue as the cell's product roadmap, not as KEEL falsifier work. *(Original scope below.)*
+  — was: done = Conductor (`engine`) / Router /
   Gate (Truth Gate `Oracle`, `INSUFFICIENT_SOURCE`→human) / Canon (factual `Memory`) / State (`Store`)
   / ToolHost (Gmail MCP) / vision retina — **all from KEEL unchanged**; only job-domain periphery.
   **If a cell forces a kernel/contract edit → KEEL's boundary is wrong: FIX KEEL FIRST** (a §23 trip).
