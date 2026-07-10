@@ -32,4 +32,4 @@ pub use mic::Microphone;
 #[cfg(feature = "screen")]
 pub use screen::ScreenCapture;
 pub use wav::write_wav_i16;
-pub use whisper::Whisper;
+pub use whisper::{Segment, Whisper};

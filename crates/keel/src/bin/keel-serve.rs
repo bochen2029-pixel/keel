@@ -41,6 +41,7 @@ async fn main() {
         .route("/health", get(|| async { "ok" }))
         .route("/v1/models", get(models))
         .route("/v1/chat/completions", post(chat))
+        .route("/v1/audio/transcriptions", post(transcribe))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(ADDR).await.unwrap_or_else(|e| fail(format!("bind {ADDR}: {e}")));
@@ -168,6 +169,61 @@ async fn chat(State(st): State<AppState>, Json(body): Json<ChatRequest>) -> impl
             let code = if e.code() == "BUDGET_EXCEEDED" { StatusCode::PAYMENT_REQUIRED } else { StatusCode::BAD_GATEWAY };
             (code, Json(json!({ "error": { "message": e.to_string(), "code": e.code() } }))).into_response()
         }
+    }
+}
+
+/// `/v1/audio/transcriptions` — the ears over protocol (D1, canon §12/§15). **Sidecar-local by
+/// design:** the request carries a *path* on the shared filesystem, not an upload — a localhost
+/// consumer and KEEL see the same disk, so a two-hour WAV never crosses the wire and raw audio
+/// never leaves the box (I3; the server binds 127.0.0.1 only). The reply is OpenAI-verbose_json-
+/// shaped (`text` + `segments[]` with float seconds) plus millisecond offsets as a keel extension.
+#[derive(Deserialize)]
+struct TranscribeRequest {
+    /// Absolute path to a 16 kHz mono PCM WAV on the shared filesystem.
+    path: String,
+}
+
+async fn transcribe(State(st): State<AppState>, Json(body): Json<TranscribeRequest>) -> impl IntoResponse {
+    let (Some(cli), Some(model)) = (st.manifest.whisper_cli(), st.manifest.whisper_model_path()) else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "error": { "message": "keel.lock servers.whisper {path, exe} + substrate.audio.file required", "code": "SUBSTRATE_UNRESOLVED" } })),
+        )
+            .into_response();
+    };
+    let wav = std::path::PathBuf::from(&body.path);
+    if !wav.is_file() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": { "message": format!("no such audio file: {}", body.path), "code": "BAD_REQUEST" } })),
+        )
+            .into_response();
+    }
+    let w = keel_adapters::Whisper::new(cli, model);
+    match w.transcribe_segments(&wav).await {
+        Ok(segments) => {
+            let text = segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ");
+            let segs: Vec<Value> = segments
+                .iter()
+                .enumerate()
+                .map(|(i, s)| {
+                    json!({
+                        "id": i,
+                        "start": s.start_ms as f64 / 1000.0,
+                        "end": s.end_ms as f64 / 1000.0,
+                        "start_ms": s.start_ms,
+                        "end_ms": s.end_ms,
+                        "text": s.text
+                    })
+                })
+                .collect();
+            Json(json!({ "text": text, "segments": segs })).into_response()
+        }
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({ "error": { "message": e.to_string(), "code": e.code() } })),
+        )
+            .into_response(),
     }
 }
 

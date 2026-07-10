@@ -19,6 +19,7 @@ substrate:
     fallbacks: [qwen3.5-4b-q4_k_m]               # smaller-VRAM tier (resolver picks by HardwareProfile)
   audio:                                         # ears (separate organ; transcribes -> text pre-cognition)
     id: whisper-large-v3-turbo
+    file: ggml-large-v3-turbo.bin                # on-disk name under servers.models_dir (D1: ears over protocol)
     sha256: TODO
     disposition: shared
     fallback: whisper-base.en                    # faster-than-realtime CPU default
@@ -58,7 +59,7 @@ servers:
   llama_cpp: { path: "C:\\llama.cpp", exe: llama-server.exe, build: b9627, cuda: "12.4", endpoint: "http://127.0.0.1:8080", launch: managed, prev_build: "C:\\llama.cpp-b8931-april" }
   # ^ updated b8931 -> b9627 on 2026-06-13 (side-by-side; prev build reversible). Validated on Qwen3.5-9B-Q5_K_M: text + reasoning_content + thinking-toggle + vision(mmproj-F16).
   #   Qwen3.5-9B native ctx = 262144 (256K). Plan: KV q8_0 + flash-attn for context headroom (the update's purpose) — validate at managed launch. TurboQuant KV (Google, ICLR'26) NOT in upstream (PR closed 2026-06-03); watch-item, not adopted.
-  whisper:   { path: "C:\\whisper.cpp", mode: "cli|server" }
+  whisper:   { path: "C:\\whisper.cpp", exe: whisper-cli.exe, mode: "cli|server" }
   models_dir: "C:\\models"
 
 # the substrate resolver tries these in order (use-whatever-exists, then launch, then cloud)

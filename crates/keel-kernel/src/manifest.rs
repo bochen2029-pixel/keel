@@ -72,9 +72,21 @@ fn default_max_tokens() -> u32 {
 pub struct ServersCfg {
     #[serde(default)]
     pub llama_cpp: LlamaCppCfg,
+    /// whisper.cpp install (keel.lock `servers.whisper`) — the ears' engine (D1: ears over protocol).
+    #[serde(default)]
+    pub whisper: WhisperCfg,
     /// Directory holding the model files (joined with `substrate.llm_vision.file`/`mmproj_file`).
     #[serde(default)]
     pub models_dir: String,
+}
+
+/// whisper.cpp install + CLI exe (keel.lock `servers.whisper`; extra fields like `mode` are ignored).
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct WhisperCfg {
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub exe: String,
 }
 
 /// llama.cpp install + server exe (keel.lock `servers.llama_cpp`).
@@ -98,6 +110,18 @@ pub struct SubstrateCfg {
     pub llm_vision: LlmVisionCfg,
     #[serde(default)]
     pub embedding: EmbeddingCfg,
+    #[serde(default)]
+    pub audio: AudioCfg,
+}
+
+/// The ears' model (keel.lock `substrate.audio`): `id` is logical; `file` is the on-disk GGML name
+/// under `servers.models_dir`.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct AudioCfg {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub file: String,
 }
 
 /// The embedding organ (keel.lock `substrate.embedding`, canon §11 — a Memory organ, NOT a tier).
@@ -379,6 +403,19 @@ impl Manifest {
         let (dir, file) = (&self.servers.models_dir, &self.substrate.embedding.file);
         (!dir.is_empty() && !file.is_empty()).then(|| join_path(dir, file))
     }
+
+    /// The whisper-cli path (`servers.whisper.path` + `exe`) — `None` when unconfigured (the ears
+    /// endpoint then fails honestly, never a guessed binary).
+    pub fn whisper_cli(&self) -> Option<String> {
+        let w = &self.servers.whisper;
+        (!w.path.is_empty() && !w.exe.is_empty()).then(|| join_path(&w.path, &w.exe))
+    }
+
+    /// The ears' GGML model path (`servers.models_dir` + `substrate.audio.file`).
+    pub fn whisper_model_path(&self) -> Option<String> {
+        let (dir, file) = (&self.servers.models_dir, &self.substrate.audio.file);
+        (!dir.is_empty() && !file.is_empty()).then(|| join_path(dir, file))
+    }
 }
 
 #[cfg(test)]
@@ -464,6 +501,9 @@ router:
         assert_eq!(m.substrate.embedding.dim, 1024);
         assert_eq!(m.substrate.embedding.port, 8090);
         assert!(m.embed_model_path().unwrap().ends_with("qwen3-embedding-0.6b-q8_0.gguf"));
+        // D1 (ears over protocol): whisper cli + model are keel.lock-driven
+        assert!(m.whisper_cli().unwrap().ends_with("whisper-cli.exe"));
+        assert!(m.whisper_model_path().unwrap().ends_with("ggml-large-v3-turbo.bin"));
         // A7: memory-autopilot defaults hold when the lock has no `memory:` section (config, not pins)
         assert!(m.memory.recall, "Ring-4 recall is on by default (wired only when the substrate resolves)");
         assert_eq!(m.memory.recall_k, 3);
