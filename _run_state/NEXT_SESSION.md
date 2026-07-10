@@ -50,15 +50,16 @@ is real in `kernel::engine` behind `router.amplify_n: 1`) · **(5)** **D2 SEXTAN
 
 ## The queue (ROADMAP order; first unblocked `[ ]`/`[?]` wins)
 
-1. **D2/SEXTANT S0 — the keystone build** (fresh session, the scope is done): read
-   `docs/proposals/sextant-on-keel.md` + `C:\SEXTANT\README.md` + SPEC §6/§11/§12 first. Build
-   the Python package (`C:\SEXTANT\sextant\`): Canon loader + `sextant tailor <jd-file>` — one
-   grammar-forced tailoring turn over serve `:7070` (`sovereign:true`, schema per SPEC §12) →
-   client gate rungs 1–4 → DOCX (`python-docx`) → PDF (Word COM `SaveAs 17`, Edge-headless
-   fallback; NO Playwright). Lived = a gate-clean tailored PDF+DOCX from a real JD in <10 s.
-   Needs: a filled `canon/profile.json` + `cv.md` (**operator input** — template committed; a
-   FICTIONAL canon works for the dry-run if the operator hasn't authored his yet). Then **S1**
-   (5 real postings → dossiers) = the D2 boundary verdict.
+1. **D2/SEXTANT S1 — the vertical slice** (S0 keystone is DONE + LIVED, cell `298f13a`; 14 cell
+   tests; the gate caught a real fabrication on turn one; boundary ledger so far: ZERO KEEL-side
+   changes). S1 = 5 real postings → full Dossiers (summary/cv/cover/email.md/form_answers/brief/
+   strategy/gate_report/status) + `queue/<date>/manifest.md` (the 15-minute approval surface),
+   zero sent. Adds: cover/email/strategy turns (same grammar-forced pattern as tailor), gate
+   rung 5 (embedding ground over KEEL's embed organ `:8090` — converts the strict competency
+   flags), the domain SQLite. **Gated on the operator authoring the real Canon**
+   (`C:\SEXTANT\canon\profile.json` + `cv.md`; the fictional one dry-runs everything). **S1
+   renders the D2 boundary verdict.** Run the cell's suite: `cd C:\SEXTANT; python -m unittest
+   discover -s . -p "test_*.py"`.
 2. **B3/ISSUE-5 — flywheel ignition:** out-of-band LoRA (Unsloth) over the exported corpus;
    measure the `escalation_rate` trend (flat is an acceptable *decided* outcome).
 3. **A5 — privacy rung-3** (`ort`/ONNX) — operator's explicit LAST. Then **C3**.
