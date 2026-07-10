@@ -1,6 +1,6 @@
 # NEXT SESSION — handoff brief (written 2026-07-10, session end)
 
-> **How to use:** read this FIRST, then the ⛑ protocol in `_run_state/STATE.md`. On any conflict,
+> **How to use:** read **`_run_state/REHYDRATE.md`** FIRST (the full status + rehydration prompt, written at completion); then this brief, then the ⛑ protocol in `_run_state/STATE.md`. On any conflict,
 > trust git + the gate over this snapshot. Supersede at the next session's end.
 
 ## THE HEADLINE: E2 PASSED — KEEL IS DONE (2026-07-10). The loop is in PERPETUAL-POLISH MODE.
