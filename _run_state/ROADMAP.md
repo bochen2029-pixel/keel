@@ -128,31 +128,35 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   swappable consolidation policy + Ring-1 remain. (**Daemon auto-trigger DONE 2026-06-15:**
   `keel daemon --consolidate-every N` self-consolidates every N ticks — a self that acts AND compresses.)
 
-- `[ ] A7` · **Memory Autopilot — "solve memory"** (operator-directed 2026-07-09: functionally
+- `[x] A7` · **Memory Autopilot — "solve memory"** — **DONE + LIVED 2026-07-09** (all six slices,
+  same session, zero contract/golden edits; **F-M1/F-M2/F-M3 PASS, F-M4 machinery proven** with one
+  honest residual — single-judge recall on adversarial plants is stochastic on the 9B; 2-of-3 vote
+  implemented; upgrade trigger = a stronger local judge. Results + six hardened lived lessons:
+  `docs/proposals/memory-autopilot.md` §6.5). (operator-directed 2026-07-09: functionally
   perpetual, self-managing, contextually-relevant memory with ZERO operator intervention; **priority
   before D1** — D1 then consumes it as the lived field validation). Full design + acceptance falsifiers:
   `docs/proposals/memory-autopilot.md` (extends `perpetual-memory.md`; REEL-v1.0 Tier-2 fidelity with
   the work-first register correction). Everything lands in L4/L5 behind the frozen `Memory` trait —
   **zero contract/golden edits**. Sub-slices, dependency-ordered:
-  - `[ ] A7.1` **budgeted assembly** — `MemoryBudget` (char-proxy, keel.lock-derived ratios) enforced
+  - `[x] A7.1` **budgeted assembly** — `MemoryBudget` (char-proxy, keel.lock-derived ratios) enforced
     in `assemble`: Ring-0 verbatim always; narrative/Ring-2/Ring-4 capped → O(1) context per turn
     regardless of Tape size (the "functionally forever" precondition).
-  - `[ ] A7.2` **episodes register** — consolidation also APPENDS a five-field digest
+  - `[x] A7.2` **episodes register** — consolidation also APPENDS a five-field digest
     (`<tape>.episodes.jsonl`, append-only, never re-compressed) — the durable mid-resolution layer
     between the rolling narrative and the raw Tape; retrieval targets for A7.3, diff substrate for A7.5.
-  - `[ ] A7.3` **Ring-4 ON by default** — lifecycle resolves/launches the embed server (keel.lock
+  - `[x] A7.3` **Ring-4 ON by default** — lifecycle resolves/launches the embed server (keel.lock
     `embedded_tiny` rung; ISSUE-8 handle discipline); L5 wires `with_embedder` at all four call sites
     when the substrate resolves (graceful degrade to Ring-0/2/3 otherwise); **two-tier index** (all
     episodes + a bounded recent-turn window) keeps ISSUE-1 brute-force fast forever; cold-start
     backfill = rebuild-from-Tape. *Latency falsifier re-opens `sqlite-vec`.*
-  - `[ ] A7.4` **the autopilot policy** — L4 `MaintenancePolicy` (turns-since · Ring-2 pressure ·
+  - `[x] A7.4` **the autopilot policy** — L4 `MaintenancePolicy` (turns-since · Ring-2 pressure ·
     session-end · cold-eyes cadence) drives maintenance with NO flags: daemon generalizes
     `--consolidate-every`; CLI consolidates on session-end when due; serve checks post-turn.
     Thresholds in keel.lock (config, not pins).
-  - `[ ] A7.5` **self-correcting narrative** — parse the cold-eyes verdict; drift → ONE bounded
+  - `[x] A7.5` **self-correcting narrative** — parse the cold-eyes verdict; drift → ONE bounded
     regenerate-from-ground-truth consolidation (REEL §10.2 fix) + an I1 `MEMORY_DRIFT_CORRECTED`
     event; persistent drift → metrics/ISSUES, never a retry loop.
-  - `[ ] A7.6` **persona-grade polish (optional)** — Ring-1 exemplar pool (anchor + rotation, never
+  - `[x] A7.6` **persona-grade polish (optional)** — Ring-1 exemplar pool (anchor + rotation, never
     auto-deleted) + Ring-2 as real conversation messages.
   **Acceptance (proposal §6):** F-M1 O(1)-context at a 5k-turn Tape · F-M2 plant-and-recall across
   consolidations · F-M3 multi-session zero-intervention lived run (by artifact) · F-M4

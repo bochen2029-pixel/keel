@@ -133,7 +133,14 @@ impl Engine {
         //     working conversation (Ring-2) as REAL messages (A7.6), spliced before the live turn.
         //     Both message lists are empty for memories that fold everything into the preamble
         //     (the genome default). A `None` memory is a no-op.
-        if let Some(mem) = &self.memory {
+        //     EXCEPT memory-maintenance turns (source "memory": consolidate / cold-eyes / correct) —
+        //     their prompts are self-contained register snapshots, and injecting the assembled
+        //     narrative would let the narrative ride into its own validation (an I5 violation) or
+        //     re-anchor a correction on the drifted copy (REEL §10.2). The read-side twin of the
+        //     Tape-exclusion on `record` (canon §22.8 — never confuse the registers).
+        if step.source.as_deref() == Some("memory") {
+            // no ring assembly for a maintenance turn
+        } else if let Some(mem) = &self.memory {
             let assembled = mem.assemble(step, ctx).await?;
             let mut preamble: Vec<Message> = Vec::new();
             if !assembled.system.is_empty() {
@@ -644,6 +651,27 @@ mod tests {
         assert_eq!(msgs.len(), 1);
         assert!(matches!(msgs[0].role, Role::System));
         assert!(matches!(&msgs[0].content[0], Content::Text { text } if text == "SOUL"));
+    }
+
+    #[tokio::test]
+    async fn maintenance_turns_skip_memory_assembly() {
+        // a memory-maintenance step (source "memory") must NOT get the assembled rings — its prompt
+        // is a self-contained register snapshot (else the narrative validates itself / a correction
+        // re-anchors on the drifted copy). The read-side twin of the Tape-exclusion on record.
+        let echo = echo(0.0);
+        let seen = echo.seen.clone();
+        let engine = engine_with(
+            one_local(echo),
+            Box::new(FixedRouter("local")),
+            Arc::new(EvidenceOracle),
+            Arc::new(RecSpine::default()),
+            Some(Arc::new(SoulMemory)),
+            None,
+        );
+        let mut s = step();
+        s.source = Some("memory".into());
+        engine.run(&mut s, &mut ctx(), req()).await.unwrap();
+        assert!(seen.lock().unwrap().is_empty(), "no SOUL preamble on a maintenance turn");
     }
 
     #[tokio::test]

@@ -143,7 +143,10 @@ pub async fn run_cold_eyes_turn(
         content: vec![Content::Text { text: prompt }],
         golden_refs: vec![],
     };
-    let req = keel_kernel::engine::request_from_step(&step);
+    let mut req = keel_kernel::engine::request_from_step(&step);
+    // the judge thinks: a diff/verification task earns reasoning effort — local + $0, so the only
+    // cost is bounded latency; a lean 9B pass misses real fabrications (caught lived, 2026-07-09).
+    req.effort.thinking = Some("high".into());
     let outcome = engine.run(&mut step, ctx, req).await?;
     Ok(Some(outcome.result.content.trim().to_string()))
 }
@@ -171,7 +174,10 @@ pub async fn run_corrective_turn(
         content: vec![Content::Text { text: prompt }],
         golden_refs: vec![],
     };
-    let req = keel_kernel::engine::request_from_step(&step);
+    let mut req = keel_kernel::engine::request_from_step(&step);
+    // rebuilding a narrative from ground truth is a reasoning task — same rationale as the judge
+    // (local + $0; a lean pass produced a degenerate stub, caught lived 2026-07-09).
+    req.effort.thinking = Some("high".into());
     let outcome = engine.run(&mut step, ctx, req).await?;
     mem.store_corrected_narrative(&outcome.result.content)
 }
@@ -253,11 +259,43 @@ pub async fn run_maintenance(
                 }
             }
             Some(Maintenance::ColdEyes) => {
-                ctx.trace_id = format!("{base}-cold-eyes");
-                match run_cold_eyes_turn(engine, mem, ctx).await {
-                    Ok(Some(verdict)) => {
+                // 2-of-3 majority vote: a single small-model judge pass is stochastic (caught lived
+                // 2026-07-09 — the same planted drift was caught twice and missed once). Votes are
+                // local + $0; the loop short-circuits when a side reaches 2.
+                let (mut drift_votes, mut consistent_votes) = (0u32, 0u32);
+                let mut findings: Vec<String> = Vec::new();
+                let mut judge_result: Option<Option<()>> = None; // None=error; Some(None)=no narrative
+                for vote in 0..3 {
+                    ctx.trace_id = format!("{base}-cold-eyes-{vote}");
+                    match run_cold_eyes_turn(engine, mem, ctx).await {
+                        Ok(Some(verdict)) => {
+                            let v = keel_services::parse_cold_eyes(&verdict);
+                            if v.consistent {
+                                consistent_votes += 1;
+                            } else {
+                                drift_votes += 1;
+                                findings = v.findings;
+                            }
+                            judge_result = Some(Some(()));
+                            if consistent_votes >= 2 || drift_votes >= 2 {
+                                break;
+                            }
+                        }
+                        Ok(None) => {
+                            judge_result = Some(None);
+                            break;
+                        }
+                        Err(e) => {
+                            eprintln!("[keel] memory: cold-eyes error: {e}");
+                            judge_result = None;
+                            break;
+                        }
+                    }
+                }
+                match judge_result {
+                    Some(Some(())) => {
                         state.consolidations_since_cold_eyes = 0;
-                        let v = keel_services::parse_cold_eyes(&verdict);
+                        let v = keel_services::ColdEyesVerdict { consistent: drift_votes < 2, findings };
                         if v.consistent {
                             if state.pending_drift {
                                 eprintln!("[keel] memory: cold-eyes CONSISTENT - the drift correction held");
@@ -288,11 +326,8 @@ pub async fn run_maintenance(
                             }
                         }
                     }
-                    Ok(None) => state.consolidations_since_cold_eyes = 0,
-                    Err(e) => {
-                        eprintln!("[keel] memory: cold-eyes error: {e}");
-                        break;
-                    }
+                    Some(None) => state.consolidations_since_cold_eyes = 0,
+                    None => break,
                 }
             }
             None => break,

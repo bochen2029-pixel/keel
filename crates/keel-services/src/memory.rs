@@ -420,6 +420,7 @@ impl FileMemory {
     pub fn parse_consolidation(output: &str) -> (String, Option<Episode>) {
         const N_MARK: &str = "=== NARRATIVE ===";
         const E_MARK: &str = "=== EPISODE ===";
+        let output = crate::maintenance::strip_think(output); // never store a reasoning envelope
         let (Some(ni), Some(ei)) = (output.find(N_MARK), output.find(E_MARK)) else {
             return (output.trim().to_string(), None);
         };
@@ -496,6 +497,12 @@ impl FileMemory {
         }
         let recent = self.recent_traces(self.working_turns);
         let (narrative, parsed_ep) = Self::parse_consolidation(out);
+        // placeholder guard (defense in depth behind the prompt fix): a model that parroted the
+        // layout hint produced no memory — store nothing rather than fossilize junk in Ring-3.
+        let n = narrative.trim();
+        if n.is_empty() || ((n.starts_with('<') || n.starts_with('(')) && (n.ends_with('>') || n.ends_with(')')) && !n.contains('\n') && n.chars().count() < 64) {
+            return Ok((0, false));
+        }
         let parsed = parsed_ep.is_some();
         let mut ep = parsed_ep.unwrap_or_else(|| Self::fallback_episode(&recent));
         ep.span_turns = recent.len();
@@ -532,24 +539,6 @@ impl FileMemory {
              Exact facts of record live in the Tape - capture intent + arc, do not restate facts as if \
              you are their source (you may be wrong; the Tape is not).\n",
         );
-        // A7.1: budget-aware generation — the narrative is loaded under a fixed ring budget, so ask
-        // the model to write within it (assembly hard-trims regardless; this keeps the trim rare).
-        if let Some(c) = chars_cap(self.budget.ring3) {
-            p.push_str(&format!("Keep the narrative under about {c} characters - it is loaded within a fixed budget.\n"));
-        }
-        // A7.2: one generation, two artifacts — the rolling narrative (topology, overwritten) AND an
-        // append-only episode digest (the REEL five-field schema; the durable mid-resolution layer).
-        p.push_str(
-            "\nReply in EXACTLY this layout (both sections, keep the markers):\n\
-             === NARRATIVE ===\n\
-             <the narrative>\n\
-             === EPISODE ===\n\
-             happened: <one line - the factual core of the new turns>\n\
-             changed: <one line - what shifted>\n\
-             matters: <one line - why this deserves remembering>\n\
-             unresolved: <one line - open loops carried forward>\n\
-             anchors: <3-6 short search phrases, semicolon-separated>\n",
-        );
         if let Some(prior) = self.narrative() {
             p.push_str("\nPrior narrative:\n");
             p.push_str(&prior);
@@ -564,6 +553,29 @@ impl FileMemory {
                 p.push('\n');
             }
         }
+        // A7.1: budget-aware generation — the narrative is loaded under a fixed ring budget, so ask
+        // the model to write within it (assembly hard-trims regardless; this keeps the trim rare).
+        if let Some(c) = chars_cap(self.budget.ring3) {
+            p.push_str(&format!("\nKeep the narrative under about {c} characters - it is loaded within a fixed budget.\n"));
+        }
+        // A7.2: one generation, two artifacts — the rolling narrative (topology, overwritten) AND an
+        // append-only episode digest (the REEL five-field schema; the durable mid-resolution layer).
+        // The format contract comes LAST (recency anchoring — a small model finishes reading here
+        // and then writes) with parenthesized never-copy hints; both anti-parrot measures are lived
+        // lessons (2026-07-09).
+        p.push_str(
+            "\nReply with BOTH sections in exactly this layout, keeping the two marker lines. Base \
+             every line on the turns above; replace every parenthesized hint with real content and \
+             never copy a hint verbatim:\n\
+             === NARRATIVE ===\n\
+             (the updated narrative)\n\
+             === EPISODE ===\n\
+             happened: (one line - the factual core of the new turns)\n\
+             changed: (one line - what shifted)\n\
+             matters: (one line - why this deserves remembering)\n\
+             unresolved: (one line - open loops carried forward)\n\
+             anchors: (3-6 short search phrases, semicolon-separated)\n",
+        );
         p
     }
 
@@ -575,15 +587,32 @@ impl FileMemory {
     pub fn cold_eyes_prompt(&self) -> Option<String> {
         let narrative = self.narrative()?;
         let recent = self.recent_traces(self.working_turns);
+        // A7.5 lesson (lived): the narrative legitimately carries history OLDER than the recent Tape
+        // window — the episodes register is the durable digest of exactly that history, so it joins
+        // the reviewer's ground truth (single-hop, near-in-time digests — the safest model-authored
+        // layer). Without it, every legitimate old-arc claim reads as drift and the damper alarms forever.
+        // Precision over recall, deliberately: cold-eyes is a drift DAMPER, not a factual oracle —
+        // critical facts never come from the narrative (I5; the Tape is the register for those), so
+        // a false alarm costs trust while a missed nitpick costs nothing. Flag only material fabrication.
         let mut p = String::from(
-            "You are a fresh, uninvested reviewer. Below is a NARRATIVE (model-authored, possibly wrong) \
-             and the TAPE (the lossless record of what actually happened - the ground truth). List each \
-             claim in the narrative the Tape does NOT support (over-reach, invention, or drift), one per \
-             line; if every claim is supported, reply with exactly the word CONSISTENT. The Tape is \
-             ground truth; the narrative is not.\n\nNARRATIVE:\n",
+            "You are a fresh, uninvested reviewer. Below is a NARRATIVE (model-authored, possibly wrong), \
+             the EPISODES (durable digests of older history), and the TAPE (the lossless record of the \
+             most recent turns - the ground truth). Flag ONLY materially false or invented claims - \
+             facts, names, numbers, or events that appear in the narrative but in NEITHER the Tape nor \
+             the episodes, or that CONTRADICT them. Differences of wording, chronology, ordering, or \
+             emphasis are NOT drift. List each materially false claim on its own line; if none, reply \
+             with exactly the word CONSISTENT.\n\nNARRATIVE:\n",
         );
         p.push_str(&narrative);
-        p.push_str("\n\nTAPE (the facts, oldest first):\n");
+        let eps = self.read_episodes(8);
+        if !eps.is_empty() {
+            p.push_str("\n\nEPISODES (older history, oldest first):\n");
+            for e in &eps {
+                p.push_str(&e.text());
+                p.push('\n');
+            }
+        }
+        p.push_str("\nTAPE (the most recent turns, oldest first):\n");
         for t in &recent {
             p.push_str(&Self::summarize(t));
             p.push('\n');
@@ -606,12 +635,15 @@ impl FileMemory {
             p.push('\n');
         }
         p.push_str(
-            "\nRegenerate the narrative FROM THE GROUND TRUTH below - drop or correct every \
-             unsupported claim; keep only what the Tape and episodes support. Do not restate facts \
-             as if you are their source (the Tape is). Reply with ONLY the corrected narrative text.\n",
+            "\nRegenerate the narrative FROM THE GROUND TRUTH below. Requirements:\n\
+             - Do NOT mention, quote, refute, or allude to the unsupported claims - write the \
+             narrative as if they never existed.\n\
+             - Keep only what the Tape and episodes support; do not restate facts as if you are \
+             their source (the Tape is).\n\
+             - Reply with ONLY the narrative text - no headings, no analysis, no commentary.\n",
         );
         if let Some(c) = chars_cap(self.budget.ring3) {
-            p.push_str(&format!("Keep it under about {c} characters.\n"));
+            p.push_str(&format!("- Keep it under about {c} characters.\n"));
         }
         let eps = self.read_episodes(5);
         if !eps.is_empty() {
@@ -635,7 +667,10 @@ impl FileMemory {
     pub fn store_corrected_narrative(&self, output: &str) -> Result<usize> {
         let (narrative, _) = Self::parse_consolidation(output.trim());
         let n = narrative.chars().count();
-        if n == 0 {
+        // degenerate guard (same rationale as store_consolidation): a stub/placeholder correction
+        // must never CLOBBER the narrative — leaving the drifted copy (still alarmed on the next
+        // cadence) beats replacing memory with nothing.
+        if n < 40 {
             return Ok(0);
         }
         self.set_narrative(&narrative)?;
@@ -1099,6 +1134,21 @@ mod tests {
         assert!(p.contains("CONSISTENT"), "the consistent-reply token");
         assert!(p.contains("sky is green"), "the narrative is included for review");
         assert!(p.contains("42"), "the Tape facts are included");
+        // A7.5 lesson: episodes join the reviewer's ground truth (older history the window can't show).
+        mem.append_episode(&Episode {
+            at_epoch_s: 1,
+            span_turns: 1,
+            what_happened: "older-history digest".into(),
+            what_changed: String::new(),
+            what_matters: String::new(),
+            unresolved: String::new(),
+            anchors: vec![],
+            parsed: true,
+        })
+        .unwrap();
+        let p2 = mem.cold_eyes_prompt().unwrap();
+        assert!(p2.contains("older-history digest"), "episodes ride the cold-eyes ground truth");
+        assert!(p2.contains("NEITHER"), "the neither-register-supports framing");
         let _ = std::fs::remove_file(&tape);
         let _ = std::fs::remove_file(narrative_path_for(&tape));
     }
@@ -1251,6 +1301,37 @@ mod tests {
         clean_ring4(&tape);
     }
 
+    // ── F-M1 (the "functionally forever" acceptance): a 5k-turn Tape assembles bounded ──
+
+    #[tokio::test]
+    async fn f_m1_a_5k_turn_tape_assembles_bounded_and_fast() {
+        let tape = temp_tape("fm1");
+        clean_ring4(&tape);
+        let mem = FileMemory::new("", &tape, 6)
+            .with_embedder(Arc::new(StubEmbed), Fingerprint::new("stub", 3), 3)
+            .with_recall_tuning(4096, 32);
+        // 5k turns straight onto the Tape + the vector sidecar (the stub embedder keeps this model-free).
+        for i in 0..5000 {
+            mem.record(&trace(&format!("filler question {i} about topic {}", i % 7), &format!("answer {i}"))).await.unwrap();
+        }
+        let mut q = base_step();
+        q.content = vec![Content::Text { text: "a France question".into() }];
+        let t0 = std::time::Instant::now();
+        let a = mem.assemble(&q, &Context::default()).await.unwrap();
+        let elapsed = t0.elapsed();
+        // O(1) context: the assembled preamble is bounded by the ring budgets, not the Tape size.
+        let total_cap_chars = (FileMemory::default_budget().ring2 as usize
+            + FileMemory::default_budget().ring3 as usize
+            + FileMemory::default_budget().ring4 as usize
+            + FileMemory::default_budget().ring1 as usize)
+            * CHARS_PER_TOKEN
+            + 512; // labels/joiners
+        assert!(a.system.chars().count() < total_cap_chars, "assemble is O(1) in Tape size (got {} chars)", a.system.chars().count());
+        // bounded scan: generous wall-clock bound (brute force over the window, never the whole Tape).
+        assert!(elapsed < std::time::Duration::from_secs(2), "recall scan stays bounded (took {elapsed:?})");
+        clean_ring4(&tape);
+    }
+
     #[test]
     fn take_chars_is_utf8_safe_and_zero_budget_means_uncapped() {
         assert_eq!(take_chars("héllo wörld", 5), "héllo"); // char boundaries, not bytes
@@ -1275,6 +1356,22 @@ mod tests {
         assert_eq!(ep.unresolved, "A7.3 wiring");
         assert_eq!(ep.anchors, vec!["episodes register", "autopilot", "A7.2"]);
         assert!(ep.text().contains("[episode] built A7.2"), "the flat retrieval text carries the digest");
+    }
+
+    #[tokio::test]
+    async fn store_consolidation_rejects_a_parroted_placeholder() {
+        let tape = temp_tape("placeholder");
+        clean_ring4(&tape);
+        let mem = FileMemory::new("", &tape, 5);
+        mem.record(&trace("q", "a")).await.unwrap();
+        // a lazy model copying the layout hint stores NOTHING (never fossilize junk into Ring-3).
+        let out = "=== NARRATIVE ===\n(the updated narrative)\n=== EPISODE ===\nhappened: real thing\nchanged: -\nmatters: -\nunresolved: -\nanchors: a\n";
+        let (n, _) = mem.store_consolidation(out).await.unwrap();
+        assert_eq!(n, 0, "placeholder narrative rejected");
+        assert!(mem.narrative().is_none(), "nothing stored");
+        let out2 = "=== NARRATIVE ===\n<the narrative>\n=== EPISODE ===\nhappened: x\nchanged: -\nmatters: -\nunresolved: -\nanchors: a\n";
+        assert_eq!(mem.store_consolidation(out2).await.unwrap().0, 0, "angle-bracket variant rejected too");
+        clean_ring4(&tape);
     }
 
     #[test]
@@ -1402,16 +1499,20 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(mem.episodes_count(), 1);
-        let n = mem.store_corrected_narrative("corrected arc, drift removed").unwrap();
+        let corrected = "corrected arc: the unsupported claim about the sky being green is removed entirely";
+        let n = mem.store_corrected_narrative(corrected).unwrap();
         assert!(n > 0);
-        assert_eq!(mem.narrative().unwrap(), "corrected arc, drift removed");
+        assert_eq!(mem.narrative().unwrap(), corrected);
         assert_eq!(mem.episodes_count(), 1, "a correction appends NO episode (nothing new happened)");
+        // a degenerate correction (a stub like a lone CONSISTENT) must never clobber the narrative.
+        assert_eq!(mem.store_corrected_narrative("CONSISTENT").unwrap(), 0);
+        assert_eq!(mem.narrative().unwrap(), corrected, "the stub did not clobber");
         // a model that still emits the two-section layout is tolerated - only the narrative is kept.
         let n2 = mem
-            .store_corrected_narrative("=== NARRATIVE ===\nlayouted correction\n=== EPISODE ===\nhappened: x\nchanged: y\nmatters: z\nunresolved: -\nanchors: q\n")
+            .store_corrected_narrative("=== NARRATIVE ===\na layouted correction long enough to clear the degenerate floor\n=== EPISODE ===\nhappened: x\nchanged: y\nmatters: z\nunresolved: -\nanchors: q\n")
             .unwrap();
         assert!(n2 > 0);
-        assert_eq!(mem.narrative().unwrap(), "layouted correction");
+        assert_eq!(mem.narrative().unwrap(), "a layouted correction long enough to clear the degenerate floor");
         assert_eq!(mem.episodes_count(), 1, "still no episode on a correction");
         clean_ring4(&tape);
     }

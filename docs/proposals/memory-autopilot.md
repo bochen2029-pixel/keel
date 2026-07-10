@@ -155,6 +155,44 @@ operation can lose Tape data.
 
 C1/C2 (recall-uplift falsifiers) remain separate Phase-C items — A7.3 is what makes them runnable.
 
+## 6.5 · RESULTS (2026-07-09 — built + lived, same session)
+
+All six slices landed (commits `56d116a` → A7.1 · `877f410` → A7.2 · `34d86ad` → A7.3 · `36d3485` →
+A7.4 · `569a430` → A7.5 · `b17e22b` → A7.6 · one hardening commit) — **zero contract/golden edits,
+seal unmoved, 155/6 green, clippy clean.**
+
+**Acceptance:** **F-M1 PASS** (5k-turn Tape → bounded assemble, <2 s scan; a permanent unit test).
+**F-M2 PASS lived** (BLUEFIN planted, buried beyond Ring-2 by six sessions, recalled correctly —
+carried by both Ring-3 and Ring-4). **F-M3 PASS lived** (zero-flag CLI sessions: policy consolidated
+at exactly the right turns, real five-field episodes appended, cursor tracked; the embed server
+cold-started itself on :8090 and backfilled the existing Tape). **F-M4: the detect → correct →
+confirm machinery is PROVEN lived** — two different planted drifts erased, `MEMORY_DRIFT_CORRECTED`
+/ `MEMORY_DRIFT_PERSISTENT` I1 events on the ledger, the correction bounded (never a loop), and the
+pending-drift confirm transition ("the drift correction held") exercised. **Honest residual:**
+single-judge recall on *adversarial* plants is stochastic on Qwen3.5-9B (organic-drift catches — the
+2026-06-15 lived case — remain solid); a 2-of-3 majority vote is implemented; the upgrade trigger is
+a stronger local judge model. Cloud judging is declined by default — sovereignty beats judge recall
+on personal memory (I3).
+
+**Lived lessons hardened in the same session (each caught by the falsifier runs, each now guarded):**
+1. **Maintenance-turn contamination** — the engine was injecting the assembled narrative into
+   cold-eyes/corrective turns (the narrative rode into its own validation; a correction re-anchored
+   on the drifted copy). Fixed in the kernel: `source == "memory"` steps skip ring assembly — the
+   read-side twin of the Tape-exclusion. +1 kernel test.
+2. **Cold-eyes window-blindness** — the reviewer saw only the recent Tape window, so legitimate
+   old-arc claims read as drift forever. Fixed: episodes join the reviewer's ground truth.
+3. **Reasoning-envelope leakage** — `<think>` blocks polluted stored registers and verdict parsing;
+   a 2048-token cap truncated a thinking pass mid-reasoning. Fixed: strip closed think-blocks,
+   treat an unclosed one as no-answer; local tier `max_tokens` → 4096 (keel.lock).
+4. **Template parroting on thin substrates** — the model copied layout placeholders verbatim.
+   Fixed: format contract moved to the end of the prompt (recency anchoring), parenthesized
+   never-copy hints, and a store-side placeholder guard.
+5. **Corrector degeneracy/sprawl** — a lean corrective pass stored a 10-char stub; a thinking one
+   wrote an essay quoting the false claims. Fixed: corrector thinks + a 40-char floor (a stub never
+   clobbers the narrative) + a never-mention-the-claims contract.
+6. **Judge stochasticity** — the same plant was caught twice and missed once. Fixed structurally:
+   2-of-3 majority vote (local, $0), short-circuiting.
+
 ## 7 · Sequencing
 
 A7.1 → A7.2 → A7.3 → A7.4 → A7.5 (each independently useful; ~a session or less each), A7.6 optional

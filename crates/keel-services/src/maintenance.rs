@@ -79,10 +79,26 @@ pub struct ColdEyesVerdict {
     pub findings: Vec<String>,
 }
 
+/// Strip a leading `<think>…</think>` block (llama-server includes one — often empty — in content
+/// even in lean mode). Register parsers must see the real reply, not the reasoning envelope.
+/// An UNCLOSED think block means generation was truncated mid-reasoning — there IS no answer, so
+/// the result is empty (the store guards then keep the junk out of the registers; lived 2026-07-09).
+pub(crate) fn strip_think(s: &str) -> &str {
+    let t = s.trim_start();
+    if let Some(rest) = t.strip_prefix("<think>") {
+        return match rest.find("</think>") {
+            Some(i) => rest[i + "</think>".len()..].trim_start(),
+            None => "",
+        };
+    }
+    s
+}
+
 /// Parse a cold-eyes reply: `CONSISTENT` (leading, case-insensitive — the prompt demands exactly
 /// that word) means no drift; anything else is a drift report whose non-empty lines are findings.
+/// A leading think-block is stripped first.
 pub fn parse_cold_eyes(text: &str) -> ColdEyesVerdict {
-    let t = text.trim();
+    let t = strip_think(text).trim();
     if t.to_uppercase().starts_with("CONSISTENT") {
         return ColdEyesVerdict { consistent: true, findings: Vec::new() };
     }
@@ -186,6 +202,8 @@ mod tests {
         assert!(!v.consistent);
         assert_eq!(v.findings.len(), 2, "non-empty lines become findings");
         assert!(parse_cold_eyes("   ").consistent, "an empty reply flags nothing (no invented drift)");
+        assert!(parse_cold_eyes("<think>\n\n</think>\nCONSISTENT").consistent, "a leading think-block is stripped");
+        assert!(!parse_cold_eyes("<think>hm</think>\nclaim X is unsupported").consistent);
         let long = (0..40).map(|i| format!("claim {i}")).collect::<Vec<_>>().join("\n");
         assert_eq!(parse_cold_eyes(&long).findings.len(), 16, "findings are bounded");
     }

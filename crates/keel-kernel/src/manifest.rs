@@ -447,8 +447,9 @@ router:
         assert_eq!(m.router.escalate_after_oracle_failures, 2);
         // the cheap-API key is referenced by env name, never inlined
         assert_eq!(m.tier("cheap-API").unwrap().api_key_env.as_deref(), Some("DEEPSEEK_API_KEY"));
-        // config-from-keel.lock: launch paths + max_tokens are keel.lock-driven (no hardcoded consts)
-        assert_eq!(m.tier("local").unwrap().max_tokens, 2048);
+        // config-from-keel.lock: launch paths + max_tokens are keel.lock-driven (no hardcoded consts).
+        // local = 4096 (A7.5: thinking maintenance turns need the headroom; 2048 truncated mid-think).
+        assert_eq!(m.tier("local").unwrap().max_tokens, 4096);
         assert_eq!(m.servers.llama_cpp.exe, "llama-server.exe");
         assert!(m.servers.models_dir.contains("models"));
         assert_eq!(m.substrate.llm_vision.file, "Qwen3.5-9B-Q5_K_M.gguf");
