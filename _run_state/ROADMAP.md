@@ -202,7 +202,24 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   rationale in WORKLOG; flip the relevant default in `keel.lock` if warranted [config, not a pin].)*
 
 ### Phase D — the first real cell (the §17/§21 proof that the genome is at the right altitude)
-- `[~] D1` · **(controlled experiment) re-home NightScribe on KEEL** — **SCOPED 2026-06-15** (boundary
+- `[x] D1` · **re-home NightScribe on KEEL — DONE + LIVED 2026-07-09.** **The boundary held: zero
+  frozen-contract/golden edits were forced by the cell.** Built: `KeelBackend` (vision+synthesis over
+  `serve_openai`; `sovereign` + `grammar` extensions — the lab's no-cloud invariant now ENFORCED by
+  KEEL's router) + `KeelTranscriber` (ears over the new sidecar-local `/v1/audio/transcriptions` —
+  an L5 protocol addition the cell pulled into existence, whisper segments w/ ms offsets) — both now
+  the cell's DEFAULT backends (legacy one flag away); its managed-llama-server subsystem is bypassed
+  in keel mode; every synthesis lands on KEEL's Tape/audit + rides A7 recall automatically. **LIVED:**
+  `nightscribe snap` → screenshot → KEEL → schema-valid verdict, exit 0; transcription endpoint lived
+  (TTS WAV → 2 ms-offset segments). 101/101 C# tests (incl. 4 new seam tests); NightScribe commit
+  `32c4f9a`. **Three genome bugs surfaced + fixed (adapter/app layers only — the falsifier working):**
+  lifecycle lacked `--jinja` (thinking toggle silently ignored) · grammar+thinking mutually exclusive
+  (adapter now forces thinking off under constrained decode) · the engine stacked a second system
+  message over a caller's own (now MERGES — protocol-composition correctness for every OpenAI client).
+  **Boundary finding (recorded):** for an over-protocol cell, afferent capture + the dHash/VAD gate
+  stay CLIENT-side (capture is inherently where the devices are); the from-KEEL change-gate applies to
+  embedded cells. Cell periphery kept as mapped: capture topology, attribution, timeline fusion,
+  minutes schemas, eval harness, intent-memory db, GUI. *(Original scope below.)*
+  (controlled experiment) re-home NightScribe on KEEL — **SCOPED 2026-06-15** (boundary
   clean — confirms the genome is at the right altitude; the build is the next major effort, C#-app→KEEL
   over `serve_openai`). NightScribe (`C:\ClaudeCode\photo2deck\labs\nightscribe`, C#/.NET, Phases 0-3
   done) **independently rebuilt KEEL's exact pieces by hand** — the .NET-of-AI-apps case in the flesh.
