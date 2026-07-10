@@ -102,8 +102,8 @@ pub struct LlamaCppCfg {
     pub endpoint: Option<String>,
 }
 
-/// Resolved substrate models (keel.lock `substrate`). `llm_vision` + `embedding` are modeled; the
-/// audio/rerank/privacy organs are picked up by their own slices.
+/// Resolved substrate models (keel.lock `substrate`). `llm_vision` + `embedding` + `audio` +
+/// `rerank` are modeled; the privacy organ is picked up by its own slice (A5).
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct SubstrateCfg {
     #[serde(default)]
@@ -112,6 +112,8 @@ pub struct SubstrateCfg {
     pub embedding: EmbeddingCfg,
     #[serde(default)]
     pub audio: AudioCfg,
+    #[serde(default)]
+    pub rerank: RerankCfg,
 }
 
 /// The ears' model (keel.lock `substrate.audio`): `id` is logical; `file` is the on-disk GGML name
@@ -148,6 +150,28 @@ fn default_embed_dim() -> usize {
 }
 fn default_embed_port() -> u16 {
     8090
+}
+
+/// The rerank organ (keel.lock `substrate.rerank`, canon §11 — a Memory organ, NOT a tier). Ships
+/// OFF (`default: identity`) until `GOLDEN_RECALL`'s C1 uplift case earns it ON; `keel recall-bench`
+/// reads this for its live leg. `file` is the on-disk GGUF under `servers.models_dir`; `port` is the
+/// rerank llama-server's own port (LLM :8080 · embed :8090 · rerank :8091 by default).
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct RerankCfg {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub file: String,
+    #[serde(default = "default_rerank_port")]
+    pub port: u16,
+}
+impl Default for RerankCfg {
+    fn default() -> Self {
+        Self { id: String::new(), file: String::new(), port: default_rerank_port() }
+    }
+}
+fn default_rerank_port() -> u16 {
+    8091
 }
 
 /// Memory autopilot config (keel.lock `memory`, A7 — config, not pins). Defaults make memory
@@ -404,6 +428,13 @@ impl Manifest {
         (!dir.is_empty() && !file.is_empty()).then(|| join_path(dir, file))
     }
 
+    /// The rerank model file path (`servers.models_dir` + `substrate.rerank.file`) — `None` when
+    /// unconfigured (the bench's rerank leg then fails honestly; never a guessed path).
+    pub fn rerank_model_path(&self) -> Option<String> {
+        let (dir, file) = (&self.servers.models_dir, &self.substrate.rerank.file);
+        (!dir.is_empty() && !file.is_empty()).then(|| join_path(dir, file))
+    }
+
     /// The whisper-cli path (`servers.whisper.path` + `exe`) — `None` when unconfigured (the ears
     /// endpoint then fails honestly, never a guessed binary).
     pub fn whisper_cli(&self) -> Option<String> {
@@ -501,6 +532,10 @@ router:
         assert_eq!(m.substrate.embedding.dim, 1024);
         assert_eq!(m.substrate.embedding.port, 8090);
         assert!(m.embed_model_path().unwrap().ends_with("qwen3-embedding-0.6b-q8_0.gguf"));
+        // C1 (recall-bench rerank leg): the rerank organ is keel.lock-driven (its own server + port)
+        assert_eq!(m.substrate.rerank.id, "qwen3-reranker-0.6b-q8");
+        assert_eq!(m.substrate.rerank.port, 8091);
+        assert!(m.rerank_model_path().unwrap().ends_with("qwen3-reranker-0.6b-q8_0.gguf"));
         // D1 (ears over protocol): whisper cli + model are keel.lock-driven
         assert!(m.whisper_cli().unwrap().ends_with("whisper-cli.exe"));
         assert!(m.whisper_model_path().unwrap().ends_with("ggml-large-v3-turbo.bin"));

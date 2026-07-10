@@ -36,6 +36,8 @@ substrate:
     format_committing: true                        # the one substrate exception to tier-interchangeability (ADR #13)
   rerank:                                          # cross-encoder upgrade to Memory's rerank() sub-seam
     id: qwen3-reranker-0.6b-q8
+    file: qwen3-reranker-0.6b-q8_0.gguf            # on-disk name under servers.models_dir (C1 bench leg)
+    port: 8091                                     # the rerank llama-server's own port (LLM :8080 - embed :8090)
     sha256: TODO
     disposition: shared
     default: identity                              # SHIPS OFF (canon §11) — pass-through until GOLDEN_RECALL earns it on

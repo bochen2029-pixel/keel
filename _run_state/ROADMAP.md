@@ -186,12 +186,22 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
 ### Phase C — the §23 falsifiers (check + DECIDE each; a decision is the deliverable)
 - `[?] C1` reranker vs identity on `GOLDEN_RECALL` → keep OFF or turn ON. (after A3) — **STATUS
   2026-06-15:** the embed organ + brute-force cosine recall + fingerprint golden are built (A3); the
-  recall@k **uplift** benchmark needs the embed model served + a labeled set. **HARD BLOCKER found
-  2026-06-15: the Qwen3-Embedding-0.6B GGUF is NOT in `C:\models`** (only the reranker
-  `qwen3-reranker-0.6b-q8_0.gguf` is present) — the benchmark cannot run until the operator provides it.
-  → ISSUE-10. (The embed *organ* + recall + fingerprint golden are built + unit-tested regardless.)
-- `[?] C2` embedder vs the MiniLM floor → keep floor or upgrade. (after A3) — same as C1 (needs the live
-  embed benchmark; deferred to a focused session).
+  recall@k **uplift** benchmark needs the embed model served + a labeled set. ~~HARD BLOCKER: the
+  Qwen3-Embedding-0.6B GGUF is NOT in `C:\models`~~ → ISSUE-10 **RESOLVED 2026-07-09** (downloaded +
+  smoke-tested). **STATUS 2026-07-10: design + machinery LANDED** — proposal
+  `docs/proposals/golden-recall-set.md` · DRAFT labeled set `tests/recall/golden-recall.json`
+  (42 docs / 30 queries / 6 families, fictional, live-shaped, `ratified:false`, thresholds proposed
+  in-file) · `Rerank` seam + `IdentityRerank` (L4) · `keel-adapters::Reranker` (`/v1/rerank`, L2) ·
+  IR metrics + stub-tested `run_recall_bench` pipeline · `keel recall-bench` CLI (DRAFT-stamped
+  until ratified; `--baseline` uplift; artifact → `.keelstate/bench/`) · keel.lock/manifest
+  `rerank.file/port:8091`. **Remaining:** ISSUE-11 (operator ratifies the set) + the step-0 rerank-GGUF
+  smoke (`--reranking` accepts it?) + the focused live run → DECIDE ON/OFF (threshold: recall@5
+  uplift ≥ 0.10 AND p95 ≤ budget). Ring-4 rerank wiring + lifecycle launch are built ONLY if ON.
+- `[?] C2` embedder vs the MiniLM floor → keep floor or upgrade. (after A3) — same design + harness as
+  C1 (one more `recall-bench` run against a MiniLM-served `:8090`; nDCG@10 uplift ≥ 0.05 keeps Qwen3
+  as default, else the floor takes it — a keel.lock config flip either way; the fingerprint guard
+  auto-rebuilds sidecars). **Blocker: the `all-MiniLM-L6-v2` GGUF is not in `C:\models`** (it IS the
+  keel.lock-pinned fallback) — provisioning is on ISSUE-11's operator list (~25–45 MB, Apache-2.0).
 - `[?] C3` privacy model vs deterministic-only on `GOLDEN_PRIVACY`. (after A5)
 - `[~] C4` `rework_rate` < 10% with oracles on — **PRELIM PASS 2026-06-15:** rework_rate **0.056 (5.6%)**
   over 18 live turns, oracles on → under 10%. ✓ (Small N; revisit with more daemon data.)
@@ -317,6 +327,17 @@ with common sense, never ask" directive, chose **mask-all-output** (state-hygien
   --pooling last` on :8090 (bounded, file-redirected, killed — the ISSUE-8 pattern) served
   `/v1/embeddings` → a **1024-dim** vector, matching the keel.lock `dim: 1024` pin. C1/C2/A3-live/
   Ring-4-live are now unblocked (each still needs its focused live session).
+- **ISSUE-11 [operator-review] — ratify the golden-recall set + provision the C2 floor.** The C1/C2
+  benchmark set `tests/recall/golden-recall.json` is DRAFTED (`ratified:false`) + the harness is
+  built + gated (2026-07-10; design: `docs/proposals/golden-recall-set.md`). Operator: (1) edit
+  docs/queries/labels/**thresholds** freely, flip `ratified:true` + `ratified_by`/`date` (a
+  structural-only lint guards coherence in CI — content edits can never break the gate);
+  (2) authorize/download `all-MiniLM-L6-v2` GGUF (~25–45 MB, Apache-2.0, already the keel.lock
+  `embedding.fallback`) into `C:\models` for the C2 leg — or say the word and a session does it;
+  (3) contingent: if the step-0 smoke shows `qwen3-reranker-0.6b-q8_0.gguf` lacks the rank head
+  (llama-server `--reranking` refuses), re-provision the sequence-classification conversion.
+  Unblocks: the focused C1/C2 live run → the two DECISIONS. Until then `keel recall-bench` runs
+  DRAFT-stamped (usable for smoke, never for the decision).
 - *(Append new issues as discovered, each: `ISSUE-N [type] — description · what unblocks it`. If the
   loop STALLS — only `[G]`/`[!]`/`[?]` slices remain and none can advance — write `.keelstate/STALLED`
   with the reason so the supervisor stops respawning, and the operator resolves the queue on next look.)*

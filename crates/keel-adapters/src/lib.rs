@@ -8,8 +8,9 @@
 //!   constrained decode, $0) · `deepseek` (cheap-API: HTTPS `/chat/completions`,
 //!   `thinking`+`reasoning_effort`, real cost) · `anthropic` (frontier: the Messages API — its own
 //!   protocol, the canonical thin gateway) · `whisper` (the ears — a local, sovereign transcription
-//!   organ, NOT a tier; canon §12).
-//! - **next:** the `mcp` tool host · the embedder/reranker (Memory organs) · the privacy classifier.
+//!   organ, NOT a tier; canon §12) · `embed` + `rerank` (Memory organs, canon §11 — sovereign-local
+//!   `/v1/embeddings` + `/v1/rerank`; not tiers).
+//! - **next:** the `mcp` tool host · the privacy classifier.
 
 pub mod anthropic;
 pub mod deepseek;
@@ -18,6 +19,7 @@ pub mod local_llama;
 #[cfg(feature = "mic")]
 pub mod mic;
 pub mod openai;
+pub mod rerank;
 #[cfg(feature = "screen")]
 pub mod screen;
 pub mod wav;
@@ -29,6 +31,7 @@ pub use embed::Embedder;
 pub use local_llama::LocalLlama;
 #[cfg(feature = "mic")]
 pub use mic::Microphone;
+pub use rerank::Reranker;
 #[cfg(feature = "screen")]
 pub use screen::ScreenCapture;
 pub use wav::write_wav_i16;

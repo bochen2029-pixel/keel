@@ -48,6 +48,11 @@ async fn run() -> keel_contracts::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("consolidate") {
         return run_consolidate().await;
     }
+    // `keel recall-bench [...]` — the C1/C2 GOLDEN_RECALL uplift benchmark over the operator-ratified
+    // labeled set (needs the live embed organ; `--rerank` adds the C1 leg). Off-loop, like `metrics`.
+    if std::env::args().nth(1).as_deref() == Some("recall-bench") {
+        return run_recall_bench_cmd().await;
+    }
     // `keel cold-eyes` — validate the model-authored Ring-3 narrative against the lossless Tape (a fresh
     // pass; the Tape is ground truth, I5 / canon §10.2). Reports CONSISTENT or the unsupported claims.
     if std::env::args().nth(1).as_deref() == Some("cold-eyes") {
@@ -326,6 +331,128 @@ fn run_distill_export() -> keel_contracts::Result<()> {
     }
     std::fs::write(&output, &jsonl).map_err(|e| keel_contracts::KeelError::Other(format!("write {output}: {e}")))?;
     eprintln!("[keel] distill-export: {pairs} pair(s) {input} -> {output} (out-of-band trainer: Unsloth)");
+    Ok(())
+}
+
+/// `keel recall-bench` — measure Ring-4 retrieval quality on the golden-recall labeled set: the C1
+/// (reranker-vs-identity, recall@k) and C2 (embedder-vs-floor, nDCG@k) falsifiers, canon §23 /
+/// `GOLDEN_RECALL`. Embeds the set's corpus + queries via the live embed organ (keel.lock-driven
+/// defaults), cosine-ranks, optionally reranks the top candidates, scores per family, prints, and
+/// writes a JSON artifact to `.keelstate/bench/` (verify-by-artifact). `--baseline <artifact>`
+/// prints the uplift vs a prior run. **While the set is unratified, every line is DRAFT-stamped
+/// and nothing is decision-grade** (docs/proposals/golden-recall-set.md).
+async fn run_recall_bench_cmd() -> keel_contracts::Result<()> {
+    let mut manifest_path = "keel.lock".to_string();
+    let mut set_path = "tests/recall/golden-recall.json".to_string();
+    let mut embed_endpoint: Option<String> = None;
+    let mut embed_model: Option<String> = None;
+    let mut rerank_endpoint: Option<String> = None;
+    let mut rerank_model: Option<String> = None;
+    let mut with_rerank = false;
+    let mut k = 5usize;
+    let mut ndcg_k = 10usize;
+    let mut candidates = 20usize;
+    let mut out: Option<String> = None;
+    let mut baseline: Option<String> = None;
+    let mut args = std::env::args().skip(2);
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--manifest" => manifest_path = args.next().unwrap_or_default(),
+            "--set" => set_path = args.next().unwrap_or(set_path),
+            "--embed-endpoint" => embed_endpoint = args.next(),
+            "--embed-model" => embed_model = args.next(),
+            "--rerank" => with_rerank = true,
+            "--rerank-endpoint" => {
+                with_rerank = true;
+                rerank_endpoint = args.next();
+            }
+            "--rerank-model" => rerank_model = args.next(),
+            "--k" => k = args.next().and_then(|n| n.parse().ok()).unwrap_or(k),
+            "--ndcg-k" => ndcg_k = args.next().and_then(|n| n.parse().ok()).unwrap_or(ndcg_k),
+            "--candidates" => candidates = args.next().and_then(|n| n.parse().ok()).unwrap_or(candidates),
+            "--out" => out = args.next(),
+            "--baseline" => baseline = args.next(),
+            _ => {}
+        }
+    }
+    let manifest = Manifest::load(&manifest_path)?;
+    let e_ep = embed_endpoint.unwrap_or_else(|| format!("http://127.0.0.1:{}", manifest.substrate.embedding.port));
+    let e_id = embed_model.unwrap_or_else(|| manifest.substrate.embedding.id.clone());
+    let embedder = keel_adapters::Embedder::new(&e_ep, &e_id);
+    let (reranker, r_id) = if with_rerank {
+        let ep = rerank_endpoint.unwrap_or_else(|| format!("http://127.0.0.1:{}", manifest.substrate.rerank.port));
+        let id = rerank_model.unwrap_or_else(|| manifest.substrate.rerank.id.clone());
+        (Some(keel_adapters::Reranker::new(&ep, &id)), Some(id))
+    } else {
+        (None, None)
+    };
+    let set = keel_services::RecallSet::load(std::path::Path::new(&set_path))?;
+    let mut cfg = keel_services::BenchConfig::new(&e_id, r_id);
+    cfg.k = k;
+    cfg.ndcg_k = ndcg_k;
+    cfg.candidates = candidates;
+    let report =
+        keel_services::run_recall_bench(&embedder, reranker.as_ref().map(|r| r as &dyn keel_services::Rerank), &set, &cfg)
+            .await?;
+
+    let stamp = if report.ratified { "" } else { " [DRAFT - set unratified; not decision-grade]" };
+    eprintln!(
+        "[keel] recall-bench: set={} v{} embedder={} dim={} rerank={}{stamp}",
+        report.set,
+        report.set_version,
+        report.embedder,
+        report.dim,
+        report.rerank.as_deref().unwrap_or("identity")
+    );
+    eprintln!(
+        "- overall (n={}): recall@{}={:.3} ndcg@{}={:.3} mrr={:.3}",
+        report.overall.n, report.k, report.overall.recall_at_k, report.ndcg_k, report.overall.ndcg_at_k, report.overall.mrr
+    );
+    for (fam, a) in &report.per_family {
+        eprintln!(
+            "- {fam} (n={}): recall@{}={:.3} ndcg@{}={:.3} mrr={:.3}",
+            a.n, report.k, a.recall_at_k, report.ndcg_k, a.ndcg_at_k, a.mrr
+        );
+    }
+    if !report.negative_top1_cosine.is_empty() {
+        let s: Vec<String> = report.negative_top1_cosine.iter().map(|v| format!("{v:.3}")).collect();
+        eprintln!("- negative-control top-1 cosine (relevance-floor calibration): {}", s.join(", "));
+    }
+    let rr_lat = match (report.rerank_p50_ms, report.rerank_p95_ms) {
+        (Some(a), Some(b)) => format!(" | rerank p50/p95 = {a}/{b} ms"),
+        _ => String::new(),
+    };
+    eprintln!("- latency: embed p50/p95 = {}/{} ms{rr_lat}", report.embed_p50_ms, report.embed_p95_ms);
+
+    let safe_id = e_id.replace(['/', '\\', ':'], "-");
+    let out_path = out.unwrap_or_else(|| {
+        format!(".keelstate/bench/recall-{safe_id}-{}.json", if with_rerank { "rerank" } else { "identity" })
+    });
+    if let Some(dir) = std::path::Path::new(&out_path).parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let pretty = serde_json::to_string_pretty(&report).map_err(|e| keel_contracts::KeelError::Other(format!("report: {e}")))?;
+    std::fs::write(&out_path, pretty).map_err(|e| keel_contracts::KeelError::Other(format!("write {out_path}: {e}")))?;
+    eprintln!("- artifact -> {out_path}");
+
+    if let Some(bp) = baseline {
+        let raw = std::fs::read_to_string(&bp).map_err(|e| keel_contracts::KeelError::Other(format!("baseline {bp}: {e}")))?;
+        let prior: keel_services::BenchReport =
+            serde_json::from_str(&raw).map_err(|e| keel_contracts::KeelError::Other(format!("baseline parse {bp}: {e}")))?;
+        if prior.set != report.set || prior.set_version != report.set_version || prior.k != report.k {
+            eprintln!(
+                "- WARNING: baseline mismatch (set {} v{} k={} vs {} v{} k={}) - the uplift below is not comparable",
+                prior.set, prior.set_version, prior.k, report.set, report.set_version, report.k
+            );
+        }
+        eprintln!(
+            "- uplift vs {bp}: recall@{} {:+.3} | ndcg@{} {:+.3}{stamp}",
+            report.k,
+            report.overall.recall_at_k - prior.overall.recall_at_k,
+            report.ndcg_k,
+            report.overall.ndcg_at_k - prior.overall.ndcg_at_k
+        );
+    }
     Ok(())
 }
 

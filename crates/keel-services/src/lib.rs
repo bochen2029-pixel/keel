@@ -28,7 +28,10 @@ pub use driver::{HeartbeatDriver, UserTurnDriver, WatchDriver};
 pub use maintenance::{parse_cold_eyes, ColdEyesVerdict, MaintState, Maintenance, MaintenancePolicy, MaintenanceStats};
 pub use memory::{Episode, FileMemory};
 pub use perception::{ChangeGate, FrameGate};
-pub use recall::{cosine, recall_top_k, should_rebuild, Fingerprint};
+pub use recall::{
+    cosine, rank_all, recall_top_k, run_recall_bench, should_rebuild, BenchConfig, BenchReport, Fingerprint,
+    IdentityRerank, RecallSet, Rerank,
+};
 pub use router::DifficultyRouter;
 pub use trace_sink::FileTraceSink;
 pub use verifier::{GoldenDispatchOracle, GoldenOracle, PropertyOracle, SchemaOracle, SourceOracle, Verifier};
