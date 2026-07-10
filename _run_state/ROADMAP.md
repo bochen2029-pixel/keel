@@ -171,9 +171,21 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   Scrubs the (prompt, completion) pair = `step.content` + `result.content`/`reasoning_content`. Wired
   into the engine's emit-on-pass (L5 `trace_sink: Some(...)`). **No new external dep.** +2 tests (scrub
   secret/ssn/email before write · append-one-line-per-trace + clean text verbatim); 119/5 green.
-- `[?] B1` · **`svc::amplify` (best-of-N + verifier-select)** — build the structure **clamped OFF**
-  (n=1). The §23 falsifier: does verified best-of-N beat single-pass on a fixed benchmark? → ISSUE-4
-  (run the benchmark; decide ON/OFF). **No new dep** (uses local tier + the verifier).
+- `[x] B1` · **`svc::amplify` (best-of-N + verifier-select)** — **BUILT clamped OFF + DECIDED OFF
+  2026-07-10 (ISSUE-4, pre-registered thresholds — the C1/C2 template).** Built: the §8 `amplify?`
+  loop step lives in `kernel::engine` (layer rule; canon §14 row reconciled) behind keel.lock
+  `router.amplify_n: 1`, gated to local critical/golden-ref'd steps with a discriminating-oracle
+  guard (a vacuous verify never burns width); I1 audits + I4 folds every candidate; selection =
+  first oracle pass; 5 kernel tests. `svc::amplify` (L4) = the falsifier bench (deterministic
+  checks = non-model assertions; pass@1/pass@N from ONE candidate pool) + `keel amplify-bench`
+  (L5) + the fixed set `tests/amplify/amplify-set.json` (25 tasks, thresholds in-file, stated
+  before any run). **Decision run (n=8, 200 local generates, $0): pass@1 0.845 → pass@8 0.960,
+  uplift +0.115 < the 0.15 bar → OFF stands.** Honest notes: pass@1 rode the 0.85 headroom edge
+  (the set skews easy — extract/format at 1.0 gave no signal); date/string/arithmetic families DO
+  recover fully under selection; logic resists sampling (wrong mode repeats). Latency was never
+  the blocker (p95 225 ms/candidate). **Re-open triggers:** a real cell workload with
+  discriminating oracles (the Director's schema gates) showing recoverable single-pass failures ·
+  a harder set revision · a weaker local substrate. Flip = one keel.lock line.
 - `[~] B3` · **flywheel metric** — **PRELIM 2026-06-15:** `escalation_rate` = **0.000 over 18 live turns**
   (base case — no oracle-failure escalations; the canon base case, "ignition is upside"). The
   **trend-down** needs the Stage-3 flywheel (distillation) running over cycles — deferred (the out-of-band
@@ -317,8 +329,9 @@ just post-DONE, to catch drift early.)*
   operator's explicit last item. Defer to the end; `openai/privacy-filter` model at `C:\models`.
 - **ISSUE-3 [operator-review]** — A6 memory narrative register = the highest-risk seam-cut; reserved
   for the operator. Propose the design here first (vs `perpetual-memory.md`).
-- **ISSUE-4 [unknown/benchmark]** — B1 amplify ON/OFF needs a verified-best-of-N-vs-single-pass
-  benchmark on a fixed set. Build OFF; run it; decide + record.
+- **ISSUE-4 — RESOLVED 2026-07-10** — B1 amplify decided **OFF** on the fixed-set benchmark
+  (pre-registered thresholds; uplift +0.115 < 0.15). See the B1 entry + the keel.lock annotation
+  for the numbers, honest caveats, and re-open triggers. The loop/knob/bench stay built.
 - **ISSUE-5 [unknown/data]** — B3/C4 `escalation_rate` + `rework_rate` trends need the A2 daemon
   producing multi-turn data over time (and ideally the flywheel running).
 - **ISSUE-6 [operator-only]** — `kernel::lock` (substrate-hash verify) is a no-op until the operator

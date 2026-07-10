@@ -96,6 +96,13 @@ router:
   sovereign_forces: local
   perception_forces: local        # raw frames/audio never egress (I3)
   escalate_after_oracle_failures: 2
+  amplify_n: 1                    # B1/§23 verified best-of-N width; 1 = OFF (applies only to local critical/golden-ref'd steps)
+  # B1 DECIDED 2026-07-10 (ISSUE-4, pre-registered thresholds): OFF STANDS - pass@8 - pass@1 = +0.115 < the
+  # 0.15 bar on the fixed set (pass@1 0.845 rode the 0.85 headroom edge - the set skews easy for the 9B;
+  # latency no blocker at p95 225 ms/candidate; logic-family failures resist sampling - a wrong MODE repeats).
+  # The kernel loop + this knob + the bench stay built; flip = this line. Re-open triggers: a real cell
+  # workload with discriminating oracles (Director schema gates) showing recoverable single-pass failures,
+  # a harder set revision, or a weaker local substrate where single-pass reliability drops.
 
 # --- persistence ------------------------------------------------------------
 ledger:    { kind: files, dir: ".\\.keelstate", audit: "audit.jsonl", tape: "tape/", traces: "traces/" }   # append-only, lossless, human-readable = system of record

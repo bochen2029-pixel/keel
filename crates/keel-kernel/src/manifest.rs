@@ -342,6 +342,11 @@ pub struct RouterCfg {
     /// Escalate one tier after this many oracle failures (canon §9).
     #[serde(default = "default_escalate")]
     pub escalate_after_oracle_failures: u32,
+    /// Best-of-N width for the engine's §8 `amplify?` step. **1 = OFF — the genome ship state**
+    /// (canon §23: amplify is a hypothesis, not an assumption; the ISSUE-4 falsifier decides).
+    /// Even when >1, width applies only to local critical/golden-ref'd steps (`kernel::engine`).
+    #[serde(default = "default_amplify_n")]
+    pub amplify_n: u32,
 }
 impl Default for RouterCfg {
     fn default() -> Self {
@@ -350,8 +355,12 @@ impl Default for RouterCfg {
             sovereign_forces: default_tier(),
             perception_forces: default_tier(),
             escalate_after_oracle_failures: default_escalate(),
+            amplify_n: default_amplify_n(),
         }
     }
+}
+fn default_amplify_n() -> u32 {
+    1
 }
 
 fn default_budget() -> f64 {
@@ -526,6 +535,8 @@ router:
         assert_eq!(m.tier("frontier").unwrap().model, "claude-opus-4-8");
         assert_eq!(m.router.default_tier, "local");
         assert_eq!(m.router.escalate_after_oracle_failures, 2);
+        // B1: the §8 amplify width is keel.lock-driven and SHIPS OFF (canon §23; ISSUE-4 decides).
+        assert_eq!(m.router.amplify_n, 1);
         // the cheap-API key is referenced by env name, never inlined
         assert_eq!(m.tier("cheap-API").unwrap().api_key_env.as_deref(), Some("DEEPSEEK_API_KEY"));
         // config-from-keel.lock: launch paths + max_tokens are keel.lock-driven (no hardcoded consts).

@@ -1,0 +1,37 @@
+{
+  "name": "amplify-set",
+  "version": 1,
+  "notes": "The fixed benchmark behind the B1/ISSUE-4 amplification falsifier (canon s23): does verified best-of-N beat single-pass on the local tier? Checks are DETERMINISTIC (equals/contains/contains_all over normalized output - non-model assertions, I5), so unlike golden-recall there is no human ground truth to ratify; the pre-registered thresholds below carry the decision policy, stated BEFORE any run (the C1/C2 discipline). pass@1 = mean per-task passing-candidate fraction over one N-candidate pool; pass@N = any-candidate-passes per task (what verifier-select achieves). DECISION RULE: amplify turns ON iff (pass@N - pass@1 >= b1_pass_at_n_uplift_min) AND (pass@1 <= b1_pass_at_1_headroom_max, else the set lacks headroom and the verdict is OFF-by-insufficient-evidence) AND (gen p95 <= b1_candidate_p95_ms_budget). Design: the tasks are short, objectively checkable, and instruction-strict (format compliance is part of what selection recovers).",
+  "thresholds": {
+    "b1_pass_at_n_uplift_min": 0.15,
+    "b1_pass_at_1_headroom_max": 0.85,
+    "b1_candidate_p95_ms_budget": 8000
+  },
+  "tasks": [
+    { "id": "a01", "family": "arithmetic", "prompt": "What is 47 multiplied by 83? Reply with only the number, no thousands separators.", "check": { "kind": "contains", "value": "3901" } },
+    { "id": "a02", "family": "arithmetic", "prompt": "What is 17 percent of 3400? Reply with only the number, no punctuation.", "check": { "kind": "equals", "value": "578" } },
+    { "id": "a03", "family": "arithmetic", "prompt": "What is 1024 minus 387? Reply with only the number, no punctuation.", "check": { "kind": "equals", "value": "637" } },
+    { "id": "a04", "family": "arithmetic", "prompt": "What is 347 multiplied by 281? Reply with only the number, no thousands separators.", "check": { "kind": "contains", "value": "97507" } },
+    { "id": "a05", "family": "arithmetic", "prompt": "What is 7 to the power of 5? Reply with only the number, no thousands separators.", "check": { "kind": "contains", "value": "16807" } },
+    { "id": "a06", "family": "arithmetic", "prompt": "What is the remainder when 1000 is divided by 7? Reply with only the number, no punctuation.", "check": { "kind": "equals", "value": "6" } },
+    { "id": "d01", "family": "date", "prompt": "In a non-leap year, how many days are there from March 3 to July 9 (count July 9, do not count March 3)? Reply with only the number, no punctuation.", "check": { "kind": "equals", "value": "128" } },
+    { "id": "d02", "family": "date", "prompt": "If today is Wednesday, what day of the week is it 9 days from today? Reply with only the day name.", "check": { "kind": "contains", "value": "friday" } },
+    { "id": "s01", "family": "string", "prompt": "Spell the word 'keel' backwards. Reply with only the reversed word, lowercase, no punctuation.", "check": { "kind": "equals", "value": "leek" } },
+    { "id": "s02", "family": "string", "prompt": "How many times does the letter r appear in the text 'strawberry raspberry'? Reply with only the number, no punctuation.", "check": { "kind": "equals", "value": "6" } },
+    { "id": "s03", "family": "string", "prompt": "Sort these words alphabetically: mango kiwi apple fig. Reply with the four words in order, separated by single spaces.", "check": { "kind": "contains", "value": "apple fig kiwi mango" } },
+    { "id": "s04", "family": "string", "prompt": "What is the third word of this sentence: 'the quick brown fox jumps'? Reply with only that word, no punctuation.", "check": { "kind": "equals", "value": "brown" } },
+    { "id": "s05", "family": "string", "prompt": "How many vowels (a, e, i, o, u only) are in the word 'sovereignty'? Reply with only the number, no punctuation.", "check": { "kind": "equals", "value": "4" } },
+    { "id": "s06", "family": "string", "prompt": "Spell the word 'harness' backwards. Reply with only the reversed word, lowercase.", "check": { "kind": "contains", "value": "ssenrah" } },
+    { "id": "l01", "family": "logic", "prompt": "Anna is taller than Ben. Ben is taller than Cy. Who is the shortest? Reply with only the name, no punctuation.", "check": { "kind": "equals", "value": "cy" } },
+    { "id": "l02", "family": "logic", "prompt": "A bat and a ball cost 1.10 in total. The bat costs exactly 1.00 more than the ball. How many cents does the ball cost? Reply with only the number, no punctuation.", "check": { "kind": "equals", "value": "5" } },
+    { "id": "l03", "family": "logic", "prompt": "How many legs do 3 spiders and 2 birds have in total? Reply with only the number, no punctuation.", "check": { "kind": "equals", "value": "28" } },
+    { "id": "l04", "family": "logic", "prompt": "Mary's father has exactly five daughters: Nana, Nene, Nini, Nono, and one more. What is the fifth daughter's name? Reply with only the name, no punctuation.", "check": { "kind": "equals", "value": "mary" } },
+    { "id": "f01", "family": "format", "prompt": "Reply with exactly this string and nothing else: KEEL-OK-042", "check": { "kind": "equals", "value": "keel-ok-042" } },
+    { "id": "f02", "family": "format", "prompt": "Output the word anchor exactly three times, joined by single hyphens, nothing else.", "check": { "kind": "equals", "value": "anchor-anchor-anchor" } },
+    { "id": "f03", "family": "format", "prompt": "Reply with a single JSON object that has exactly one key named port whose integer value is 8080. No prose, no code fences.", "check": { "kind": "contains_all", "value": ["\"port\"", "8080"] } },
+    { "id": "f04", "family": "format", "prompt": "Reply with the single word: unsinkable", "check": { "kind": "equals", "value": "unsinkable" } },
+    { "id": "e01", "family": "extract", "prompt": "From this text: 'Order #7741 shipped to Oslo on May 2'. What is the order number? Reply with only the number, no punctuation.", "check": { "kind": "equals", "value": "7741" } },
+    { "id": "e02", "family": "extract", "prompt": "From this text: 'server listening on 127.0.0.1:9443'. What is the port? Reply with only the number, no punctuation.", "check": { "kind": "equals", "value": "9443" } },
+    { "id": "e03", "family": "extract", "prompt": "From this text: 'the invoice totals 4,250 SEK'. What is the currency code? Reply with only the three-letter code, no punctuation.", "check": { "kind": "equals", "value": "sek" } }
+  ]
+}

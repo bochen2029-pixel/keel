@@ -361,7 +361,7 @@ KEEL assumes four **canonical primitives** and *resolves* them rather than embed
 | `mw::cache` | M | cache-prefix discipline (the 100× lever) | 4/7 |
 | `svc::router` | S | the §9 router; degrades to pass-through for single-model cells | 6/7 |
 | `svc::verifier` | S | oracle registry runner + joint-wrong detector | 7/7 |
-| `svc::amplify` | S | best-of-N + verifier-select — **ships OFF** | 1/7 |
+| `svc::amplify` | S | best-of-N + verifier-select — **ships OFF**. *(As built: the loop step itself lives in `kernel::engine` per the §8 cycle — the layer rule keeps L4 out of the kernel — behind keel.lock `router.amplify_n`, gated to local critical/golden-ref'd steps; `svc::amplify` carries the §23 falsifier bench + check primitives.)* | 1/7 |
 | `svc::memory` | S | ringed assembly, the Tape ledger, consolidation, pluggable retrieval | 7/7 |
 | `svc::perception` | S | capture + change-gate (dHash/VAD) + sample + the `see()`/`hear()` retinas | 5/7 |
 | `svc::driver` | S | user-turn + heartbeat/watch/outreach drivers (initiative) | 4/7 |

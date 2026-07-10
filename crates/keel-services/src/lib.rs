@@ -13,6 +13,7 @@
 //! - **next:** `amplify` (best-of-N, ships OFF) · the perception capture organs · memory's
 //!   narrative register + retrieval.
 
+pub mod amplify;
 pub mod distill;
 pub mod driver;
 pub mod maintenance;
@@ -23,6 +24,7 @@ pub mod router;
 pub mod trace_sink;
 pub mod verifier;
 
+pub use amplify::{check_output, run_amplify_bench, AmplifyReport, AmplifySet};
 pub use distill::{export_training_jsonl, training_pair};
 pub use driver::{HeartbeatDriver, UserTurnDriver, WatchDriver};
 pub use maintenance::{parse_cold_eyes, ColdEyesVerdict, MaintState, Maintenance, MaintenancePolicy, MaintenanceStats};

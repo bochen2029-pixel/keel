@@ -1,20 +1,23 @@
 # NEXT SESSION — handoff brief (written 2026-07-10, session end)
 
 > **How to use:** read this FIRST, then run the ⛑ reconstitution protocol in `_run_state/STATE.md`
-> (canon + CLAUDE.md + ROADMAP + the last three WORKLOG entries — 2026-07-10 was a three-slice day).
+> (canon + CLAUDE.md + ROADMAP + the last FOUR WORKLOG entries — 2026-07-10 was a four-slice day).
 > This file carries only the deltas the standing docs don't; on any conflict, trust git + the gate
 > over this snapshot. Supersede or delete this file at the next session's end.
 
 ## Where 2026-07-10 ended (verify, never recall)
 
-`git -C C:\KEEL log --oneline -6` → HEAD = the C1/C2-decision commit, pushed, tree clean.
-`cargo test` (PowerShell, from `C:\KEEL`) → **167 passed / 7 ignored**, clippy clean, seal `db4377b3` green.
+`git -C C:\KEEL log --oneline -6` → HEAD = the B1-decision commit, pushed, tree clean.
+`cargo test` (PowerShell, from `C:\KEEL`) → **178 passed / 7 ignored / 0 failed**, clippy
+**0 warnings whole-tree**, seal `db4377b3` green.
 
-Three slices in one day: **(1)** C1/C2 design + harness (`73430c7` + smoke `cdca9e6`) · **(2)**
-golden-recall **v2 hardening** measured to convergence (`f2c1dd3`) · **(3)** set **RATIFIED**
-(operator delegation, thresholds pre-registered) + MiniLM provisioned byte-exact + the three
-decision legs → **C1 DECIDED OFF · C2 DECIDED floor-default (falsifier trip!) + the flip executed
-and lived**. ISSUE-11 RESOLVED. `GOLDEN_RECALL` fully accounted for.
+Four slices in one day: **(1)** C1/C2 design + harness (`73430c7` + smoke `cdca9e6`) · **(2)**
+golden-recall **v2 hardening** measured to convergence (`f2c1dd3`) · **(3)** set **RATIFIED** +
+MiniLM provisioned + the decision legs → **C1 OFF · C2 floor-default (falsifier trip!) + the flip
+lived** (`76845dd`, ISSUE-11 resolved) · **(4)** **B1 amplify BUILT clamped-OFF + DECIDED OFF**
+(ISSUE-4 resolved: uplift +0.115 < the pre-registered 0.15 bar; the §8 `amplify?` loop is real in
+`kernel::engine` behind `router.amplify_n: 1`, gated to local critical/ref'd steps with a
+discriminating-oracle guard; the 25-task deterministic set + `keel amplify-bench` are the harness).
 
 ## Session-specific state the standing docs don't carry
 
@@ -27,11 +30,14 @@ and lived**. ISSUE-11 RESOLVED. `GOLDEN_RECALL` fully accounted for.
   annotations + the 2026-07-10 WORKLOG entries. Re-open triggers recorded there (C1: organic
   recall misses / k=1; C2: Qwen3 instruct-prefix experiment / symmetric-hardening pass). Decision
   artifacts: `.keelstate/bench/recall-*.json` (per-query `top_ids` included).
-- **Standing local procs** (all self-reviving): llama-server `:8080` (`--jinja`, pid fresh — the
-  old one died and the resolver revived it) · embed server `:8090` (**MiniLM now**) · `keel-serve`
-  `:7070` (restarted on the fresh build, keys injected). Rerank/MiniLM bench servers (:8091/:8092)
-  were killed after their legs. Stop `keel-serve` before any `cargo build/test` that relinks the
-  `keel` crate (sibling-bin file lock → os error 5).
+- **Standing local procs** (all self-reviving): llama-server `:8080` (`--jinja`) · embed server
+  `:8090` (**MiniLM now**) · `keel-serve` `:7070` (restarted on the final build, keys injected).
+  The llama-servers get **reaped when their spawning tool-shell tears down** (observed twice
+  2026-07-10) — not a defect; any `keel` call re-resolves the whole substrate. Rerank/MiniLM bench
+  servers (:8091/:8092) were killed after their legs. **Two tooling rules:** stop `keel-serve`
+  before any `cargo build/test` that relinks the `keel` crate (sibling-bin lock → os error 5), and
+  **`cargo test` does NOT relink `target\debug\*.exe`** — run `cargo build -p keel` before
+  executing a just-edited bin (a stale bin routes the subcommand as a plain prompt → junk Tape turn).
 - **`git stash@{0}`** = the June-17 anomaly (forensics only — never pop casually).
 - **The `nul` junk file** reappears after cargo runs; `cmd /c del "\\?\C:\KEEL\nul"` (a
   path-protection hook may block it — then just leave it; it's untracked and unstaged).
@@ -41,17 +47,16 @@ and lived**. ISSUE-11 RESOLVED. `GOLDEN_RECALL` fully accounted for.
 
 ## The queue (ROADMAP order; first unblocked `[ ]`/`[?]` wins)
 
-1. **B1 — `svc::amplify`** built clamped-OFF (n=1) + the ISSUE-4 best-of-N-vs-single-pass
-   benchmark → decide ON/OFF. (Structure is model-free buildable; the benchmark is a live session.
-   The golden-recall bench pattern — pre-registered threshold, decision-grade artifacts — is the
-   template.)
-2. **B3/ISSUE-5 — flywheel ignition:** out-of-band LoRA (Unsloth) over the exported corpus;
-   measure the `escalation_rate` trend (flat is an acceptable *decided* outcome).
+1. **B3/ISSUE-5 — flywheel ignition:** out-of-band LoRA (Unsloth) over the exported corpus;
+   measure the `escalation_rate` trend (flat is an acceptable *decided* outcome). Out-of-band +
+   likely operator-present; if gated, route to:
+2. **D2 — SEXTANT** (the canon's named first cell) + **D3 — ToolHost** (pulled by D2; the last
+   conformance-coverage gap). The next major build effort — best begun fresh (the D1 pattern).
 3. **A5 — privacy rung-3** (`ort`/ONNX) — operator's explicit LAST. Then **C3**.
-4. **D2 — SEXTANT** (the canon's named first cell) + **D3 — ToolHost** (pulled by D2; the last
-   conformance-coverage gap).
-5. **E2 — the DONE review** (C1/C2/C4/C5 are now decided/prelim-passed; remaining for DONE:
-   B1-decided, C3, ISSUE-6 pins, and the falsifier re-checks with fresh data).
+4. **E2 — the DONE review** — after today the falsifier scorecard reads: C1 ✓ C2 ✓ B1 ✓ (all
+   pre-registered + decided) · C4/C5 prelim-passed (small N; re-check with fresh daemon data) ·
+   C3 pending A5 · B3 pending the LoRA run. Remaining for DONE: B3-decided, A5+C3, D2 (or D1
+   suffices per §3), ISSUE-6 pins, the completion account.
 
 **Operator-only ISSUES open:** ISSUE-6 (`sha256:` pins → then `kernel::lock` verify) · the Fable-5
 v0.3.0 hindsight ruling (piecemeal, non-blocking) · autonomy re-grant (sessions run SUPERVISED

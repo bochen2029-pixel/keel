@@ -102,6 +102,11 @@ pub struct Engine {
     trace_sink: Option<Arc<dyn TraceSink>>,
     default_tier: String,
     goldens: HashMap<String, GoldenCase>,
+    /// Best-of-N width for the §8 `amplify?` step. **1 = OFF — the genome ship state (canon §23:
+    /// amplify is a hypothesis, never an assumption; ISSUE-4's falsifier decides).** Set via
+    /// [`Engine::with_amplify`] (L5 wires keel.lock `router.amplify_n`). Even when >1, width only
+    /// applies to local critical/golden-ref'd steps — see the (5) guard in [`Engine::run`].
+    amplify_n: u32,
 }
 
 impl Engine {
@@ -116,7 +121,13 @@ impl Engine {
             ));
         }
         let EngineConfig { slots, router, oracle, baseline, spine, memory, trace_sink, default_tier, goldens } = config;
-        Ok(Engine { slots, router, oracle, baseline, spine, memory, trace_sink, default_tier, goldens })
+        Ok(Engine { slots, router, oracle, baseline, spine, memory, trace_sink, default_tier, goldens, amplify_n: 1 })
+    }
+
+    /// Set the §8 amplify width (verified best-of-N; canon §23). `n <= 1` = OFF (the default).
+    pub fn with_amplify(mut self, n: u32) -> Self {
+        self.amplify_n = n.max(1);
+        self
     }
 
     /// The tiers actually wired (sorted).
@@ -193,18 +204,13 @@ impl Engine {
             .ok_or_else(|| KeelError::TierUnavailable(format!("no slot for routed tier '{tier_used}'")))?;
         req.model = slot.model.clone();
         // The router picks thinking depth per tier; a caller's explicit thinking overrides it.
-        // best-of-N (n>1) ships OFF until `amplify` earns it (§23) — single-shot.
         let thinking = req.effort.thinking.take().or_else(|| decision.effort.thinking.clone());
-        req.effort = Effort { n: 1, thinking };
-        let result = slot.chain.run(req, ctx, slot.tier.clone()).await?;
+        req.effort = Effort { n: 1, thinking }; // each model call is ONE completion — width is the loop below
 
-        // (4) fold cost into the Context (I4). `mw::cost` is the pre-call gate; the engine owns the
-        //     post-call total, so a multi-call turn (escalation) sees accumulated spend.
-        ctx.cost.add(&result.tier, result.cost);
-
-        // (5) resolve the step's golden_refs against the injected registry (I5). An unresolved ref is
-        //     a MISSING ASSERTION — tracked here and failed-closed below (a step that names ground
-        //     truth we cannot supply must never verify vacuously).
+        // (4) resolve the step's golden_refs against the injected registry (I5) — BEFORE generating,
+        //     because amplify (5) must know whether a discriminating assertion exists at all. An
+        //     unresolved ref is a MISSING ASSERTION — tracked here and failed-closed below (a step
+        //     that names ground truth we cannot supply must never verify vacuously).
         let mut golden_cases = Vec::new();
         let mut missing = Vec::new();
         for name in &step.golden_refs {
@@ -214,12 +220,55 @@ impl Engine {
             }
         }
 
-        // (6) verify (I5). The injected `oracle` is the CORRECTNESS surface (the golden-ref dispatch +
-        //     a cell's domain oracles); ITS evidence is what satisfies the critical-step guard (#3).
-        let output = StepOutput { content: result.content.clone(), artifact: Value::Null };
-        let mut verdict = self.oracle.verify(&output, &golden_cases, ctx).await?;
-        // capture BEFORE folding the baseline: only a CORRECTNESS assertion counts for #3.
+        // (5) generate + verify, with AMPLIFY (canon §8 `amplify?` / §23 — verified best-of-N +
+        //     oracle-select; **ships OFF**, keel.lock `router.amplify_n: 1`; ISSUE-4 decides).
+        //     Width applies only when ALL hold:
+        //       · `amplify_n > 1` (the config dial, wired by L5),
+        //       · the routed tier is the free local one (§12.3 "local is electricity" — a paid tier
+        //         never multiplies spend),
+        //       · the step carries a DISCRIMINATING assertion (critical, or a resolved golden_ref):
+        //         a vacuous verify passes every candidate, so selection without one is noise,
+        //       · no golden_ref is unresolved (fail-closed hits every candidate alike — retrying is waste).
+        //     Sequential with first-pass short-circuit (expected extra cost ≈ only on failing turns).
+        //     Every candidate runs the SAME chain (I1 audits each call; I4 pre-gates each) and folds
+        //     its cost into the Context (the engine owns the post-call total). Selection = the FIRST
+        //     candidate the oracle passes; none pass → the LAST candidate proceeds (its failed verdict
+        //     drives the escalation ladder exactly as single-pass would).
+        let width = if self.amplify_n > 1
+            && tier_used == "local"
+            && (step.critical || !golden_cases.is_empty())
+            && missing.is_empty()
+        {
+            self.amplify_n
+        } else {
+            1
+        };
+        let mut attempts: u32 = 0;
+        let (result, mut verdict, output) = loop {
+            attempts += 1;
+            let r = slot.chain.run(req.clone(), ctx, slot.tier.clone()).await?;
+            // (I4) fold per candidate — `mw::cost` stays the pre-call gate, this is the post-call total.
+            ctx.cost.add(&r.tier, r.cost);
+            let o = StepOutput { content: r.content.clone(), artifact: Value::Null };
+            let v = self.oracle.verify(&o, &golden_cases, ctx).await?;
+            // stop on: pass (selected) · no discriminating evidence (vacuous — candidates are
+            // indistinguishable, more sampling is pure waste) · width exhausted.
+            if v.passed || v.evidence.is_empty() || attempts >= width {
+                break (r, v, o);
+            }
+        };
+        // capture BEFORE folding the baseline or the amplify note: only a CORRECTNESS assertion counts for #3.
         let correctness_asserted = !verdict.evidence.is_empty();
+        // The amplify story lands in the verdict evidence (ledger + checkpoint visible) — it is a
+        // process note, never a correctness assertion (hence pushed after the #3 capture).
+        if width > 1 && (attempts > 1 || verdict.passed) {
+            let detail = if verdict.passed {
+                format!("amplify: candidate {attempts}/{width} selected by the oracle (verified best-of-N)")
+            } else {
+                format!("amplify: no candidate passed after {attempts}/{width} (last kept; escalation unchanged)")
+            };
+            verdict.evidence.push(Assertion { kind: "amplify".into(), detail });
+        }
 
         // (6a) the optional always-on baseline oracle (a cell's safety/sovereignty check) runs and folds
         //      into the verdict — but it is NOT a correctness oracle, so it is **excluded** from #3.
@@ -467,6 +516,56 @@ mod tests {
         }
     }
 
+    /// Fails with **no evidence** — the vacuous-fail case (amplify must not burn width on it).
+    struct FailNoEvidenceOracle;
+    #[async_trait]
+    impl Oracle for FailNoEvidenceOracle {
+        async fn verify(&self, _o: &StepOutput, _g: &[GoldenCase], _c: &Context) -> Result<Verdict> {
+            Ok(Verdict { passed: false, failures: vec!["x".into()], joint_wrong: false, evidence: vec![] })
+        }
+    }
+
+    /// A DISCRIMINATING oracle: passes iff the content is exactly "good" (evidence either way) —
+    /// the selection signal verified best-of-N needs.
+    struct ContentOracle;
+    #[async_trait]
+    impl Oracle for ContentOracle {
+        async fn verify(&self, o: &StepOutput, _g: &[GoldenCase], _c: &Context) -> Result<Verdict> {
+            let ok = o.content == "good";
+            Ok(Verdict {
+                passed: ok,
+                failures: if ok { vec![] } else { vec!["content != good".into()] },
+                joint_wrong: false,
+                evidence: vec![Assertion { kind: "content".into(), detail: format!("checked '{}'", o.content) }],
+            })
+        }
+    }
+
+    /// Pops a scripted output per call (repeats the last one when exhausted); counts calls —
+    /// the candidate stream for the amplify tests.
+    struct ScriptedTier {
+        outputs: Mutex<VecDeque<&'static str>>,
+        calls: Arc<Mutex<u32>>,
+    }
+    impl ScriptedTier {
+        fn new(outputs: &[&'static str]) -> (Arc<Self>, Arc<Mutex<u32>>) {
+            let calls = Arc::new(Mutex::new(0));
+            (Arc::new(Self { outputs: Mutex::new(outputs.iter().copied().collect()), calls: calls.clone() }), calls)
+        }
+    }
+    #[async_trait]
+    impl ModelTier for ScriptedTier {
+        fn caps(&self) -> Capabilities {
+            Capabilities::default()
+        }
+        async fn generate(&self, req: GenerateRequest, _ctx: &Context) -> Result<GenerateResult> {
+            *self.calls.lock().unwrap() += 1;
+            let mut q = self.outputs.lock().unwrap();
+            let out = if q.len() > 1 { q.pop_front().unwrap() } else { *q.front().unwrap_or(&"") };
+            Ok(GenerateResult { content: out.into(), cost: 0.1, tier: "local".into(), model: req.model, ..Default::default() })
+        }
+    }
+
     #[derive(Default)]
     struct RecSpine {
         checkpoints: Mutex<Vec<(RunId, State)>>,
@@ -635,6 +734,113 @@ mod tests {
         assert_eq!(s.oracle_failures, 1); // I5 feedback (failure count)
         assert_eq!(spine.checkpoints.lock().unwrap().len(), 1); // still checkpointed
         assert_eq!(*sink.emitted.lock().unwrap(), 0); // no flywheel emit on a failed verdict
+    }
+
+    // ── amplify (canon §8 `amplify?` / §23 — verified best-of-N, ships OFF) ──
+
+    #[tokio::test]
+    async fn amplify_selects_the_first_passing_candidate() {
+        let (tier, calls) = ScriptedTier::new(&["bad", "good", "never-reached"]);
+        let sink = Arc::new(RecSink::default());
+        let engine = engine_with(
+            one_local(tier),
+            Box::new(FixedRouter("local")),
+            Arc::new(ContentOracle),
+            Arc::new(RecSpine::default()),
+            None,
+            Some(sink.clone()),
+        )
+        .with_amplify(4);
+        let mut s = step();
+        s.critical = true; // the discriminating-assertion gate
+        let mut c = ctx();
+        let out = engine.run(&mut s, &mut c, req()).await.unwrap();
+        assert_eq!(out.result.content, "good", "the oracle selected candidate 2");
+        assert!(out.verdict.passed);
+        assert_eq!(*calls.lock().unwrap(), 2, "short-circuits on the first pass");
+        assert!((c.cost.total - 0.2).abs() < 1e-9, "I4 folds EVERY candidate");
+        assert!(out.verdict.evidence.iter().any(|e| e.kind == "amplify" && e.detail.contains("candidate 2/4")));
+        assert_eq!(s.oracle_failures, 0, "a selected pass is a pass");
+        assert_eq!(*sink.emitted.lock().unwrap(), 1, "the selected trace feeds the flywheel");
+    }
+
+    #[tokio::test]
+    async fn amplify_requires_a_discriminating_assertion() {
+        // non-critical, no golden_refs → width clamps to 1 even with amplify on (selection
+        // without a discriminating oracle is noise — canon §23).
+        let (tier, calls) = ScriptedTier::new(&["bad", "good"]);
+        let engine = engine_with(
+            one_local(tier),
+            Box::new(FixedRouter("local")),
+            Arc::new(ContentOracle),
+            Arc::new(RecSpine::default()),
+            None,
+            None,
+        )
+        .with_amplify(8);
+        let out = engine.run(&mut step(), &mut ctx(), req()).await.unwrap();
+        assert_eq!(*calls.lock().unwrap(), 1, "no assertion -> single-pass");
+        assert!(!out.verdict.passed);
+        assert!(!out.verdict.evidence.iter().any(|e| e.kind == "amplify"));
+    }
+
+    #[tokio::test]
+    async fn amplify_exhausts_keeps_the_last_and_escalation_fires_once() {
+        let (tier, calls) = ScriptedTier::new(&["bad"]);
+        let engine = engine_with(
+            one_local(tier),
+            Box::new(FixedRouter("local")),
+            Arc::new(ContentOracle),
+            Arc::new(RecSpine::default()),
+            None,
+            None,
+        )
+        .with_amplify(3);
+        let mut s = step();
+        s.critical = true;
+        let out = engine.run(&mut s, &mut ctx(), req()).await.unwrap();
+        assert_eq!(*calls.lock().unwrap(), 3, "width exhausted");
+        assert!(!out.verdict.passed);
+        assert_eq!(s.oracle_failures, 1, "ONE turn failed, not three - the ladder sees one failure");
+        assert!(out.verdict.evidence.iter().any(|e| e.kind == "amplify" && e.detail.contains("no candidate passed after 3/3")));
+    }
+
+    #[tokio::test]
+    async fn amplify_stops_on_a_vacuous_verdict() {
+        // a fail with NO evidence cannot discriminate candidates — retrying is pure waste.
+        let (tier, calls) = ScriptedTier::new(&["bad"]);
+        let engine = engine_with(
+            one_local(tier),
+            Box::new(FixedRouter("local")),
+            Arc::new(FailNoEvidenceOracle),
+            Arc::new(RecSpine::default()),
+            None,
+            None,
+        )
+        .with_amplify(8);
+        let mut s = step();
+        s.critical = true;
+        let out = engine.run(&mut s, &mut ctx(), req()).await.unwrap();
+        assert_eq!(*calls.lock().unwrap(), 1, "vacuous verify -> no extra candidates");
+        assert!(!out.verdict.evidence.iter().any(|e| e.kind == "amplify"), "nothing amplify-worthy happened");
+    }
+
+    #[tokio::test]
+    async fn amplify_is_off_by_default() {
+        let (tier, calls) = ScriptedTier::new(&["bad", "good"]);
+        let engine = engine_with(
+            one_local(tier),
+            Box::new(FixedRouter("local")),
+            Arc::new(ContentOracle),
+            Arc::new(RecSpine::default()),
+            None,
+            None,
+        ); // no .with_amplify — the genome ship state
+        let mut s = step();
+        s.critical = true;
+        let out = engine.run(&mut s, &mut ctx(), req()).await.unwrap();
+        assert_eq!(*calls.lock().unwrap(), 1, "ships OFF: single-pass even on a critical step");
+        assert!(!out.verdict.passed);
     }
 
     #[tokio::test]

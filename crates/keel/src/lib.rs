@@ -420,7 +420,10 @@ impl Engine {
             trace_sink,
             default_tier: manifest.router.default_tier.clone(),
             goldens,
-        })?;
+        })?
+        // §8 `amplify?` — verified best-of-N on local critical/ref'd steps; keel.lock-driven,
+        // ships OFF (`router.amplify_n: 1`; canon §23 / ISSUE-4 decides).
+        .with_amplify(manifest.router.amplify_n);
         Ok(Engine(engine))
     }
 

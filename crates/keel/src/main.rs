@@ -53,6 +53,11 @@ async fn run() -> keel_contracts::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("recall-bench") {
         return run_recall_bench_cmd().await;
     }
+    // `keel amplify-bench [...]` — the B1/ISSUE-4 amplification falsifier (canon §23): verified
+    // best-of-N vs single-pass on the fixed deterministic set, against the live local tier.
+    if std::env::args().nth(1).as_deref() == Some("amplify-bench") {
+        return run_amplify_bench_cmd().await;
+    }
     // `keel cold-eyes` — validate the model-authored Ring-3 narrative against the lossless Tape (a fresh
     // pass; the Tape is ground truth, I5 / canon §10.2). Reports CONSISTENT or the unsupported claims.
     if std::env::args().nth(1).as_deref() == Some("cold-eyes") {
@@ -453,6 +458,92 @@ async fn run_recall_bench_cmd() -> keel_contracts::Result<()> {
             report.overall.ndcg_at_k - prior.overall.ndcg_at_k
         );
     }
+    Ok(())
+}
+
+/// `keel amplify-bench` — the B1/ISSUE-4 amplification falsifier (canon §23): generate `--n`
+/// candidates per task of the fixed deterministic set against the live LOCAL tier, estimate
+/// pass@1 (mean passing fraction) vs pass@N (verifier-select) from the one candidate pool, print
+/// the pre-registered threshold verdicts, and write the decision artifact to `.keelstate/bench/`.
+/// Drives the adapter directly (no engine/Tape/audit — a bench harness, like `recall-bench`).
+async fn run_amplify_bench_cmd() -> keel_contracts::Result<()> {
+    let mut manifest_path = "keel.lock".to_string();
+    let mut set_path = "tests/amplify/amplify-set.json".to_string();
+    let mut n: u32 = 8;
+    let mut out: Option<String> = None;
+    let mut args = std::env::args().skip(2);
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--manifest" => manifest_path = args.next().unwrap_or_default(),
+            "--set" => set_path = args.next().unwrap_or(set_path),
+            "--n" => n = args.next().and_then(|v| v.parse().ok()).unwrap_or(n),
+            "--out" => out = args.next(),
+            _ => {}
+        }
+    }
+    let manifest = Manifest::load(&manifest_path)?;
+    let tcfg = manifest
+        .tiers
+        .get("local")
+        .ok_or_else(|| keel_contracts::KeelError::Other("no local tier in the manifest".into()))?;
+    let endpoint = tcfg
+        .endpoint
+        .clone()
+        .or_else(|| manifest.servers.llama_cpp.endpoint.clone())
+        .unwrap_or_else(|| "http://127.0.0.1:8080".to_string());
+    // honest preflight: the bench never cold-starts the substrate — any `keel "..."` turn does.
+    let port = endpoint.rsplit(':').next().and_then(|p| p.trim_end_matches('/').parse::<u16>().ok()).unwrap_or(8080);
+    if !keel_kernel::health_ok("127.0.0.1", port, std::time::Duration::from_millis(600)) {
+        return Err(keel_contracts::KeelError::TierUnavailable(format!(
+            "no llama-server ready at {endpoint} - run a `keel \"hi\"` turn first to cold-start the substrate"
+        )));
+    }
+    let tier = keel_adapters::LocalLlama::new(&endpoint, tcfg.model.clone(), "local".to_string(), tcfg.price.to_price(), tcfg.vision)
+        .with_max_tokens(tcfg.max_tokens);
+    let set = keel_services::AmplifySet::load(std::path::Path::new(&set_path))?;
+    let ctx = new_context(&manifest);
+    let report = keel_services::run_amplify_bench(&tier, &ctx, &set, n, &tcfg.model).await?;
+
+    let uplift = report.overall.pass_at_n - report.overall.pass_at_1;
+    eprintln!(
+        "[keel] amplify-bench: set={} v{} model={} n={}",
+        report.set, report.set_version, report.model, report.n
+    );
+    eprintln!(
+        "- overall ({} tasks): pass@1={:.3} pass@{}={:.3} uplift={:+.3}",
+        report.overall.tasks, report.overall.pass_at_1, report.n, report.overall.pass_at_n, uplift
+    );
+    for (fam, a) in &report.per_family {
+        eprintln!("- {fam} ({} tasks): pass@1={:.3} pass@{}={:.3}", a.tasks, a.pass_at_1, report.n, a.pass_at_n);
+    }
+    eprintln!("- latency: gen p50/p95 = {}/{} ms per candidate", report.gen_p50_ms, report.gen_p95_ms);
+    // the pre-registered threshold verdicts (decision INPUT — the decision itself lands in WORKLOG).
+    let th = |k: &str| set.thresholds.get(k).and_then(|v| v.as_f64());
+    if let (Some(min_uplift), Some(headroom_max), Some(p95_budget)) = (
+        th("b1_pass_at_n_uplift_min"),
+        th("b1_pass_at_1_headroom_max"),
+        th("b1_candidate_p95_ms_budget"),
+    ) {
+        eprintln!(
+            "- thresholds (pre-registered): uplift {:+.3} vs >= {:.2} -> {} | pass@1 {:.3} vs <= {:.2} headroom -> {} | p95 {} ms vs <= {} -> {}",
+            uplift,
+            min_uplift,
+            if (uplift as f64) >= min_uplift { "PASS" } else { "FAIL" },
+            report.overall.pass_at_1,
+            headroom_max,
+            if (report.overall.pass_at_1 as f64) <= headroom_max { "OK" } else { "INSUFFICIENT HEADROOM" },
+            report.gen_p95_ms,
+            p95_budget,
+            if (report.gen_p95_ms as f64) <= p95_budget { "OK" } else { "OVER BUDGET" },
+        );
+    }
+    let out_path = out.unwrap_or_else(|| format!(".keelstate/bench/amplify-n{}.json", report.n));
+    if let Some(dir) = std::path::Path::new(&out_path).parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let pretty = serde_json::to_string_pretty(&report).map_err(|e| keel_contracts::KeelError::Other(format!("report: {e}")))?;
+    std::fs::write(&out_path, pretty).map_err(|e| keel_contracts::KeelError::Other(format!("write {out_path}: {e}")))?;
+    eprintln!("- artifact -> {out_path}");
     Ok(())
 }
 

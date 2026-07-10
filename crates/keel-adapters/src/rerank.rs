@@ -48,7 +48,7 @@ impl Reranker {
             }
             scores[i] = s as f32;
         }
-        if scores.iter().any(|s| *s == f32::NEG_INFINITY) {
+        if scores.contains(&f32::NEG_INFINITY) {
             return Err(KeelError::Other("rerank: response did not score every document".into()));
         }
         Ok(scores)
