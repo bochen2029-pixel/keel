@@ -186,10 +186,17 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   the blocker (p95 225 ms/candidate). **Re-open triggers:** a real cell workload with
   discriminating oracles (the Director's schema gates) showing recoverable single-pass failures ·
   a harder set revision · a weaker local substrate. Flip = one keel.lock line.
-- `[~] B3` · **flywheel metric** — **PRELIM 2026-06-15:** `escalation_rate` = **0.000 over 18 live turns**
-  (base case — no oracle-failure escalations; the canon base case, "ignition is upside"). The
-  **trend-down** needs the Stage-3 flywheel (distillation) running over cycles — deferred (the out-of-band
-  trainer isn't run). Base case measured ✓; trend pending the flywheel. → ISSUE-5.
+- `[x] B3` · **flywheel metric — DECIDED 2026-07-10: the base case HOLDS; ignition DEFERRED ON
+  EVIDENCE (ISSUE-5 closed).** Lifetime measurement (73 turns incl. D2's real cell traffic):
+  `escalation_rate` **0.000** — zero has no headroom to trend down; the local model handles 100%
+  of its routed work at `rework_rate` **0.014**. Corpus = **59 verified pairs** (4→59 since June —
+  B2/B4 accumulation works; ~10× under the ~500-pair LoRA floor, so training now proves nothing
+  and risks a 1.4%-failure model). The canon pre-authorized this outcome (§21 "size to the base
+  case"; "flat is an acceptable decided outcome"). **Pre-registered ignition triggers + the
+  turnkey Unsloth pipeline (train→merge→GGUF→quant-fair swap→pre-registered measurement):
+  `docs/flywheel-ignition.md`** — corpus ≥ 500 AND (escalation > 0.02 sustained · rework > 0.05 ·
+  a cell-identified capability gap with its own eval set). Standing watch = any `keel metrics`
+  read. *(PRELIM history 2026-06-15: 0.000 over 18 turns.)*
 - `[x] B4` · **`svc::distill` (out-of-band)** — DONE 2026-06-15. `keel-services::distill`
   (`training_pair`/`export_training_jsonl`) flattens the scrubbed corpus → chat-format
   `{messages:[user,assistant]}` JSONL; `keel distill-export [--in][--out]` writes the training file.
@@ -242,8 +249,11 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   (no instruct-prefix queries). **Re-open triggers:** the Qwen3 instruct-prefix experiment · a
   symmetric-hardening set pass. Qwen3 stays on disk as the lock `fallback`.
 - `[?] C3` privacy model vs deterministic-only on `GOLDEN_PRIVACY`. (after A5)
-- `[~] C4` `rework_rate` < 10% with oracles on — **PRELIM PASS 2026-06-15:** rework_rate **0.056 (5.6%)**
-  over 18 live turns, oracles on → under 10%. ✓ (Small N; revisit with more daemon data.)
+- `[x] C4` `rework_rate` < 10% with oracles on — **PASS, DECIDED 2026-07-10:** rework_rate
+  **0.014 (1.4%)** over the 73-turn lifetime index (incl. real cell traffic), oracles on — 7×
+  under the bar, with 4× the prelim N and the trend IMPROVING (0.056 → 0.014). Re-check rides
+  every `keel metrics` read; keel.lock `rework_rate_max: 0.10` is the standing alarm bar.
+  *(PRELIM 2026-06-15: 0.056 over 18 turns.)*
 - `[~] C5` economic: KEEL vs cheap-API-for-everything — **PRELIM KEEL-FAVORABLE 2026-06-15:** routed
   **17/18 turns to FREE local**, 1 to cheap-API (total $0.0004) vs ~$0.0018 for cheap-API-everything
   (~78% saved). KEEL's routing pays. ✓ (Small N.)
@@ -366,8 +376,10 @@ just post-DONE, to catch drift early.)*
 - **ISSUE-4 — RESOLVED 2026-07-10** — B1 amplify decided **OFF** on the fixed-set benchmark
   (pre-registered thresholds; uplift +0.115 < 0.15). See the B1 entry + the keel.lock annotation
   for the numbers, honest caveats, and re-open triggers. The loop/knob/bench stay built.
-- **ISSUE-5 [unknown/data]** — B3/C4 `escalation_rate` + `rework_rate` trends need the A2 daemon
-  producing multi-turn data over time (and ideally the flywheel running).
+- **ISSUE-5 — RESOLVED 2026-07-10** — B3 decided on lifetime data (73 turns): base case holds
+  (escalation 0.000 flat-at-floor, rework 0.014), ignition deferred on evidence with pre-registered
+  triggers + the turnkey pipeline in `docs/flywheel-ignition.md`. C4's proxy stands re-confirmed
+  at 0.014 (was 0.056 prelim) — well under the 0.10 bar with 4× the N.
 - **ISSUE-6 [operator-only]** — `kernel::lock` (substrate-hash verify) is a no-op until the operator
   pins the `sha256: TODO` fields in `keel.lock`. Build the verify-logic; it stays dormant until pinned.
 - **ISSUE-7 [deferred — no trigger yet]** — `mw::cache` (cache-prefix discipline) waits until

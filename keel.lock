@@ -111,3 +111,7 @@ index:     { kind: sqlite, file: ".\\.keelstate\\index.db", derived: true, rebui
 # --- invariants (pins for the freeze check) ---------------------------------
 golden:     { set_sha256: TODO }   # agent-frozen ground truth; operator-only --update
 thresholds: { rework_rate_max: 0.10, cache_hit_min: 0.70, escalation_rate: downward_trend }
+# B3 DECIDED 2026-07-10 (ISSUE-5 closed): the flywheel base case HOLDS - escalation_rate 0.000 over 73
+# lifetime turns (incl. real cell traffic) satisfies downward_trend at the floor; the live watch signal
+# is "does not RISE". Ignition DEFERRED ON EVIDENCE (corpus 59 pairs, ~10x under the LoRA floor).
+# Pre-registered triggers + the turnkey pipeline: docs/flywheel-ignition.md.
