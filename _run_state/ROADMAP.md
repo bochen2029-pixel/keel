@@ -291,12 +291,18 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   spec's own router/§16, conductor-per-turn/§15, gate-teeth/§11, run-state/§9 are superseded by
   KEEL; deterministic gate rungs + domain DB + approval UX stay periphery (the D1 rule). Repo
   seeded: `C:\SEXTANT` git-init'd (`ea5b9ed`, LOCAL-ONLY) — README + Canon/directive templates +
-  gitignore (Canon/PII never in git). **Build phases: S0 keystone** (`sextant tailor <jd>` →
-  grammar-forced tailoring turn → client gate → DOCX+PDF via Word COM/Edge, lived) → **S1 vertical
-  slice** (5 real postings → staged dossiers) **← the D2 boundary verdict renders at S1**; S2–S4
-  (discovery/conductor/dispatch) continue as the cell's product roadmap. Operator inputs wanted
-  before S1 lives: author the real Canon (`canon/profile.json` + `cv.md` from the template) —
-  everything else has decided defaults (proposal §5).
+  gitignore (Canon/PII never in git). **S0 KEYSTONE DONE + LIVED same day (`298f13a`):**
+  `sextant tailor <jd>` = one grammar-forced sovereign turn over serve (local, $0, ~11 s) → Truth
+  Gate rungs 1–4 (client-side, deterministic) → DOCX + **PDF via Word COM in 2.6 s** (Edge fallback
+  wired; no Playwright) → staged with tailored.json/gate_report/status. **The gate earned its keep
+  on turn one:** caught a JD-echo fabrication ("5+ years" — no 5 in the canon), blocked rendering;
+  the model used `insufficient_source` correctly UNPROMPTED (CISSP → needs_human, twice). Added
+  ONE bounded gate-informed corrective retry (the cell-side twin of KEEL's verify→feedback;
+  offline-proven: findings carried, never a third call). 14 offline tests. Fictional dry-run canon
+  (gitignored). **Boundary ledger at S0: ZERO KEEL-side changes — not even app-layer.** →
+  **S1 vertical slice next** (5 real postings → full Dossiers + manifest.md) **← the D2 boundary
+  verdict renders at S1**; S2–S4 continue as the cell's product roadmap. Operator inputs wanted
+  before S1 lives on real jobs: author the real Canon (`canon/profile.json` + `cv.md`).
 - `[ ] D3` · **`ToolHost` (MCP) adapter** — a §3 protocol bet, unbuilt; **pulled by D2** (SEXTANT's
   Gmail MCP). Build when the cell needs it. **New dep:** an MCP client crate (vet at the time).
   **TIMING DECIDED 2026-07-10:** lands at **SEXTANT S4 (dispatch)** — the spec's own last phase;
