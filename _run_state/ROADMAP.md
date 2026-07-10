@@ -254,9 +254,10 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   under the bar, with 4× the prelim N and the trend IMPROVING (0.056 → 0.014). Re-check rides
   every `keel metrics` read; keel.lock `rework_rate_max: 0.10` is the standing alarm bar.
   *(PRELIM 2026-06-15: 0.056 over 18 turns.)*
-- `[~] C5` economic: KEEL vs cheap-API-for-everything — **PRELIM KEEL-FAVORABLE 2026-06-15:** routed
-  **17/18 turns to FREE local**, 1 to cheap-API (total $0.0004) vs ~$0.0018 for cheap-API-everything
-  (~78% saved). KEEL's routing pays. ✓ (Small N.)
+- `[x] C5` economic: KEEL vs cheap-API-for-everything — **KEEL-FAVORABLE, DECIDED at E2
+  (2026-07-10, 4× the prelim N):** lifetime **72/73 turns routed FREE local**, total spend
+  **$0.0004** vs ~$0.01–0.04 for cheap-API-everything (≥ ~96% saved). The routing economy pays.
+  *(PRELIM 2026-06-15: 17/18 local, ~78% saved.)*
 - *(Each falsifier trip says "revise, don't extend" — blast radius one adapter. Record the decision +
   rationale in WORKLOG; flip the relevant default in `keel.lock` if warranted [config, not a pin].)*
 
@@ -339,8 +340,15 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   invariant → its golden family or structural unit test, with the two documented gaps (`recall`
   conformance-ahead until A3; `ToolHost` unbuilt until D3). Verdict: the 6 golden families are a complete
   *behavioral* conformance layer; structural joints carry no golden by design (a port re-passes their unit tests).
-- `[ ] E2` · **the DONE review** — all phases done/decided, ISSUES resolved-or-accepted, the §4.2
-  invariant scorecard all-green; write the completion account; flip `keel.lock` `stage:` to `stage3`/done.
+- `[x] E2` · **the DONE review — PASSED 2026-07-10 (operator "go ahead with E2").** The full
+  completion account: **`docs/DONE-REVIEW.md`** — the §3 audit by artifact (this-session gate
+  178/7/0 + clippy 0; seal `db4377b3` read + freeze-test green; 73/73 lifetime turns in the
+  Spine): every decidable falsifier **measured-and-decided under pre-registered thresholds**
+  (C1/C2/C4/C5/B1/B3/D1/D2 — none skipped) · two cells, zero joint edits · the five invariants +
+  the reversibility gate live at lifetime scale · **two explicit operator-accepted exclusions**
+  (A5+C3 = operator's LAST → polish item #1; ISSUE-6 pins → verify dormant until pinned).
+  keel.lock `stage:` flipped **stage0 → stage3**; `.keelstate/DONE` written (the supervisor's
+  wind-down-to-polish signal, not a halt). **The loop is now in PERPETUAL-POLISH MODE (§4).**
 
 ---
 

@@ -3,7 +3,11 @@
 # reads this to discover/launch/route; a fresh box is provisioned from it. Hashes are the
 # reproducibility contract — a run is replayable only against pinned weights.
 
-keel:        { version: 0.2.0, stage: stage0 }   # spec -> stage0 -> stage1 -> stage2 -> stage3
+keel:        { version: 0.2.0, stage: stage3 }   # spec -> stage0 -> stage1 -> stage2 -> stage3
+# E2 DONE REVIEW PASSED 2026-07-10 (docs/DONE-REVIEW.md): every decidable falsifier measured-and-decided,
+# two cells stand with zero joint edits, invariants live at lifetime scale, seal unmoved since genesis.
+# Two operator-accepted exclusions: A5+C3 privacy rung-3 (operator's explicit LAST -> polish item #1)
+# and ISSUE-6 sha256 pins (kernel::lock verify dormant until pinned). The loop is in perpetual-polish mode.
 
 # --- canonical primitives ---------------------------------------------------
 # disposition: `embedded` = baked into the binary; `shared` = system asset, download-once.
