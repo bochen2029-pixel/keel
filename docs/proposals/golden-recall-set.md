@@ -139,3 +139,38 @@ decisions.
 - **Relevance-floor tuning.** The negative-control top-1 scores in every artifact are the data;
   tightening the `cos <= 0` floor is a later, evidence-backed change.
 - **sqlite-vec** stays closed (ISSUE-1) unless the bench's own latency numbers re-open it.
+
+## 7 · ADDENDUM (same day, 2026-07-10): the DRAFT smoke ran live — findings that shape ratification
+
+The full harness was smoked against the real organs the same session (DRAFT-stamped; artifacts in
+`.keelstate/bench/`). Both legs lived: **baseline** (Qwen3 + identity) and **C1 rerank leg**
+(Qwen3-Reranker-0.6B on `:8091`). §4's step-0 contingency is **retired**: the on-disk reranker GGUF
+loads under `--reranking` (up in 6 s) and `/v1/rerank` scores correctly (relevant 0.9975 vs
+distractor 1.3e-05) — ISSUE-11 item (3) is moot.
+
+**Draft numbers (n=27 scored queries; NOT decision-grade until ratification):**
+
+| leg | recall@5 | nDCG@10 | MRR | latency |
+|---|---|---|---|---|
+| Qwen3 + identity | 0.975 | 0.869 | 0.917 | embed p50/p95 = 18/30 ms |
+| Qwen3 + reranker | 1.000 | 0.930 | 0.957 | rerank p50/p95 = **358/551 ms** |
+| uplift | **+0.025** | **+0.061** | +0.040 | well under the 1500 ms budget |
+
+The set discriminates where designed: keyword_trap MRR 0.750 → 0.833 (traps steal top-1 from
+cosine; the cross-encoder recovers), multi recall@5 0.833 → 1.000, paraphrase MRR 0.938 → 1.000.
+Negative-control top-1 cosines: **0.689 / 0.528 / 0.443** — the live `cos <= 0` floor would inject
+all three; any future floor sits near ~0.7 on this embedder, or stays score-relative.
+
+**The load-bearing finding — recall@5 saturates on the draft:** the identity baseline already
+recalls 97.5% into the top-5, so the golden-named C1 measure (`recall_at_5_uplift >= 0.10`) has
+only 0.025 of headroom — as drafted, C1 would mechanically decide OFF even though the reranker
+visibly improves ordering everywhere (nDCG +0.061, MRR +0.040). **Recommendation (Remedy A): harden
+the corpus to v2 before ratifying** — grow it ~2–3× with near-topic confusable distractors (same
+entities/domains, wrong facts) and add queries engineered so identity's recall@5 lands ~0.6–0.8
+(the per-query artifact data shows where cosine ranks each relevant doc — the authoring feedback
+loop). That restores recall@5 headroom and keeps both the frozen golden's letter and the proposed
+thresholds intact. The alternative (redefining C1's input as ordering uplift) would drift from the
+frozen golden's named measure — not worth it when hardening the set achieves the same honestly.
+
+v2 authoring is a session task on the operator's word (or the next unsupervised session's, if
+ungated); ratification then applies to v2.

@@ -194,9 +194,14 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   in-file) · `Rerank` seam + `IdentityRerank` (L4) · `keel-adapters::Reranker` (`/v1/rerank`, L2) ·
   IR metrics + stub-tested `run_recall_bench` pipeline · `keel recall-bench` CLI (DRAFT-stamped
   until ratified; `--baseline` uplift; artifact → `.keelstate/bench/`) · keel.lock/manifest
-  `rerank.file/port:8091`. **Remaining:** ISSUE-11 (operator ratifies the set) + the step-0 rerank-GGUF
-  smoke (`--reranking` accepts it?) + the focused live run → DECIDE ON/OFF (threshold: recall@5
-  uplift ≥ 0.10 AND p95 ≤ budget). Ring-4 rerank wiring + lifecycle launch are built ONLY if ON.
+  `rerank.file/port:8091`. **SMOKED LIVE same day (DRAFT, not decision-grade):** step-0 retired —
+  the reranker GGUF has the rank head (`--reranking` up in 6 s; 0.9975 vs 1.3e-05); both legs ran:
+  identity recall@5 0.975 / nDCG 0.869 / MRR 0.917 → rerank 1.000 / 0.930 / 0.957 (uplift +0.025 /
+  **+0.061** / +0.040) at rerank p95 551 ms (≤ budget). **Finding: recall@5 saturates on the draft
+  (0.975 baseline)** → the golden-named C1 measure needs a **hardened v2 corpus** (near-topic
+  confusables; target identity recall@5 ≈ 0.6–0.8) before ratification — proposal §7 Remedy A.
+  **Remaining:** v2 hardening → ISSUE-11 ratification → the focused live run → DECIDE ON/OFF
+  (recall@5 uplift ≥ 0.10 AND p95 ≤ budget). Ring-4 rerank wiring + lifecycle launch ONLY if ON.
 - `[?] C2` embedder vs the MiniLM floor → keep floor or upgrade. (after A3) — same design + harness as
   C1 (one more `recall-bench` run against a MiniLM-served `:8090`; nDCG@10 uplift ≥ 0.05 keeps Qwen3
   as default, else the floor takes it — a keel.lock config flip either way; the fingerprint guard
@@ -334,10 +339,12 @@ with common sense, never ask" directive, chose **mask-all-output** (state-hygien
   structural-only lint guards coherence in CI — content edits can never break the gate);
   (2) authorize/download `all-MiniLM-L6-v2` GGUF (~25–45 MB, Apache-2.0, already the keel.lock
   `embedding.fallback`) into `C:\models` for the C2 leg — or say the word and a session does it;
-  (3) contingent: if the step-0 smoke shows `qwen3-reranker-0.6b-q8_0.gguf` lacks the rank head
-  (llama-server `--reranking` refuses), re-provision the sequence-classification conversion.
-  Unblocks: the focused C1/C2 live run → the two DECISIONS. Until then `keel recall-bench` runs
-  DRAFT-stamped (usable for smoke, never for the decision).
+  ~~(3) contingent rerank-GGUF re-provision~~ **RETIRED 2026-07-10** — the step-0 smoke PASSED live
+  (`--reranking` loads it; `/v1/rerank` scores correctly). **(0, new — before ratifying:** the DRAFT
+  smoke showed identity recall@5 saturates at 0.975, so the set needs the **v2 hardening pass**
+  (proposal §7 Remedy A) for C1's golden-named measure to have headroom — a session authors v2 on
+  your word.**)** Unblocks: the focused C1/C2 live run → the two DECISIONS. Until then
+  `keel recall-bench` runs DRAFT-stamped (usable for smoke, never for the decision).
 - *(Append new issues as discovered, each: `ISSUE-N [type] — description · what unblocks it`. If the
   loop STALLS — only `[G]`/`[!]`/`[?]` slices remain and none can advance — write `.keelstate/STALLED`
   with the reason so the supervisor stops respawning, and the operator resolves the queue on next look.)*
