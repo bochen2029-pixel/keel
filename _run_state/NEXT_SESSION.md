@@ -18,14 +18,7 @@ deferred-with-triggers) + **C4/C5 closed** · **E2 passed**.
 
 ## Perpetual-polish mode (ROADMAP §4) — the standing loop now
 
-- **Polish item #1 — A5 privacy rung-3: PROVISIONED + DESIGNED (operator un-gated 2026-07-10);
-  the `ort` build is THE next focused session.** The brief = `docs/proposals/privacy-rung3.md`
-  (§4 build plan, §5 risks): model byte-verified at `C:\models\privacy-filter` (quantized-CPU
-  ONNX 1.62 GB + tokenizer.json + viterbi_calibration); `PiiClassifier` trait in keel-middleware,
-  ort impl behind a `privacy-model` feature in keel-services, additive-only, egress-only,
-  KEEL-owned Viterbi; **C3 thresholds already pre-registered** (golden case + ≥+0.30 recall +
-  ≤10% FP + ≤500 ms p95, else OFF-with-machinery-built). First build is minutes (onnxruntime
-  fetch) — stop keel-serve first; inspect the ONNX graph I/O before writing the runner.
+- **A5 + C3: CLOSED (2026-07-10, same day)** — rung-3 built + lived, C3 DECIDED ON (uplift +0.95, 0 FP, p95 161 ms; artifact `.keelstate/bench/privacy-c3.json`); keel.lock `privacy.default: on` (egress-only, feature-carrying builds — `cargo build --features privacy-model` when the operator wants rung-3 in his daily binary). DONE-REVIEW re-stamped: **ONE exclusion remains (ISSUE-6 pins, operator-only)**. The falsifier table is complete: C1-C5, B1, B3, D1, D2 — nine decided, zero skipped.
 - Then, in any order, each a gated/banked/pushed slice: `/code-review` the tree → fix findings ·
   raise thin coverage · **falsifier re-checks with fresh data** (standing watches: `keel metrics`
   escalation "does not rise" + rework < 0.10; the flywheel triggers in
