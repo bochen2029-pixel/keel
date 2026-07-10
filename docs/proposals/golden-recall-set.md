@@ -174,3 +174,39 @@ frozen golden's named measure — not worth it when hardening the set achieves t
 
 v2 authoring is a session task on the operator's word (or the next unsupervised session's, if
 ungated); ratification then applies to v2.
+
+## 8 · ADDENDUM (2026-07-10, operator go): v2 HARDENED + measured — ready to ratify
+
+The v2 pass landed (operator: "go ahead with the v2 hardening pass"). The corpus grew **42 → 108
+docs** (near-topic confusable clusters engineered around the hard queries — same entities/domains,
+wrong facts, all judge-honest grade-0s) and **30 → 41 queries** (36 scored + 5 negatives). Two v1
+queries were re-specified for judge-clarity (`q03` "my medication", `q09` "software release");
+six relevance maps were extended where the new corpus made additional docs honestly relevant
+(q06/q16/q21/q22/q27/q10/q24/q35/q39). The harness gained per-query `top_ids` (the final top-10
+ranking in every artifact) — the authoring/ratification feedback loop that drove the three
+measure→reinforce iterations (0.975 → 0.886 → 0.842 → 0.786).
+
+**v2 DRAFT numbers (real organs, DRAFT-stamped; artifacts in `.keelstate/bench/`):**
+
+| leg | recall@5 | nDCG@10 | MRR | latency |
+|---|---|---|---|---|
+| Qwen3 + identity | **0.786** | 0.718 | 0.772 | embed p50/p95 = 14/56 ms |
+| Qwen3 + reranker | 0.856 | 0.828 | 0.859 | rerank p50/p95 = 534/676 ms |
+| uplift | **+0.070** | **+0.111** | +0.087 | ≤ budget |
+
+The baseline sits **inside the 0.6–0.8 target window** — the saturation problem is fixed and the
+golden-named measure has real headroom (family floor: keyword_trap 0.611, episodic 0.694; paraphrase
+deliberately stays high at 0.963 — recall must still work). The reranker leg recovers six queries
+with zero regressions (q34 0→1, q06/q39/q35 to full, q10/q27 partial) and leaves four hard cases
+down for both (q11 dentist, q14/q32/q33 traps) — honest hard cases, not artifacts.
+
+**The decision input ratification must settle (numbers, not speculation):** as drafted
+(`c1_recall_at_5_uplift: 0.10`) the draft reranker uplift **+0.070 would decide C1 = OFF**, even
+though ordering gains are large (nDCG **+0.111**, MRR +0.087) and every change is an improvement.
+With n=36, +0.070 ≈ 2.5 net queries — above quantization noise (~0.028/query). The operator's
+threshold choice at ratification is the real C1 policy call:
+- **keep 0.10** → C1 likely OFF (reranker not worth a third server for top-5 *presence*), or
+- **ratify 0.05** → C1 likely ON (ordering + presence gains justify it at 534 ms/query), or
+- keep 0.10 and note the nDCG evidence in the WORKLOG decision either way.
+The agent deliberately does NOT pre-pick this — it is exactly the "operator-authored ground truth"
+the design review exists for. (The C2 leg is unchanged: blocked only on the MiniLM download.)

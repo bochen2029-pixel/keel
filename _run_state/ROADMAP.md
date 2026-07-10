@@ -200,8 +200,14 @@ Whisper) **✅**. **112 tests green / 5 ignored; seal `db4377b3`; public.** (Lat
   **+0.061** / +0.040) at rerank p95 551 ms (≤ budget). **Finding: recall@5 saturates on the draft
   (0.975 baseline)** → the golden-named C1 measure needs a **hardened v2 corpus** (near-topic
   confusables; target identity recall@5 ≈ 0.6–0.8) before ratification — proposal §7 Remedy A.
-  **Remaining:** v2 hardening → ISSUE-11 ratification → the focused live run → DECIDE ON/OFF
-  (recall@5 uplift ≥ 0.10 AND p95 ≤ budget). Ring-4 rerank wiring + lifecycle launch ONLY if ON.
+  **v2 HARDENED + measured (2026-07-10, operator go):** 108 docs / 41 queries via three
+  measure→reinforce iterations (`top_ids` in the artifact = the authoring loop); identity baseline
+  now **0.786 — in the window** (traps 0.611); rerank leg **+0.070 recall@5 / +0.111 nDCG@10 /
+  +0.087 MRR** at p95 676 ms, six queries recovered, zero regressions. **The ratification call is
+  now concrete:** at the drafted 0.10 threshold C1 = OFF (+0.070 falls short) despite big ordering
+  gains — the operator ratifies the threshold (0.10 vs 0.05) WITH the set (proposal §8).
+  **Remaining:** ISSUE-11 ratification → the decision run → DECIDE ON/OFF. Ring-4 rerank wiring +
+  lifecycle launch ONLY if ON.
 - `[?] C2` embedder vs the MiniLM floor → keep floor or upgrade. (after A3) — same design + harness as
   C1 (one more `recall-bench` run against a MiniLM-served `:8090`; nDCG@10 uplift ≥ 0.05 keeps Qwen3
   as default, else the floor takes it — a keel.lock config flip either way; the fingerprint guard
@@ -340,10 +346,11 @@ with common sense, never ask" directive, chose **mask-all-output** (state-hygien
   (2) authorize/download `all-MiniLM-L6-v2` GGUF (~25–45 MB, Apache-2.0, already the keel.lock
   `embedding.fallback`) into `C:\models` for the C2 leg — or say the word and a session does it;
   ~~(3) contingent rerank-GGUF re-provision~~ **RETIRED 2026-07-10** — the step-0 smoke PASSED live
-  (`--reranking` loads it; `/v1/rerank` scores correctly). **(0, new — before ratifying:** the DRAFT
-  smoke showed identity recall@5 saturates at 0.975, so the set needs the **v2 hardening pass**
-  (proposal §7 Remedy A) for C1's golden-named measure to have headroom — a session authors v2 on
-  your word.**)** Unblocks: the focused C1/C2 live run → the two DECISIONS. Until then
+  (`--reranking` loads it; `/v1/rerank` scores correctly). ~~(0) v2 hardening~~ **DONE 2026-07-10**
+  (operator go): 108 docs / 41 queries, identity baseline 0.786 (in-window), draft rerank uplift
+  +0.070 recall@5 / +0.111 nDCG@10. **What's left is exactly (1) + (2): ratify the set — including
+  the C1 threshold call (0.10 → OFF vs 0.05 → ON; proposal §8 lays out the evidence) — and drop
+  the MiniLM GGUF for C2.** Unblocks: the decision run → the two DECISIONS. Until then
   `keel recall-bench` runs DRAFT-stamped (usable for smoke, never for the decision).
 - *(Append new issues as discovered, each: `ISSUE-N [type] — description · what unblocks it`. If the
   loop STALLS — only `[G]`/`[!]`/`[?]` slices remain and none can advance — write `.keelstate/STALLED`

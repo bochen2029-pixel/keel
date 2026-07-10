@@ -16,26 +16,30 @@ One slice delivered: **C1/C2 design-review + harness** (`73430c7`) — proposal
 seam + `IdentityRerank` · `keel-adapters::Reranker` (`/v1/rerank`) · IR metrics + stub-tested
 `run_recall_bench` · **`keel recall-bench`** CLI (DRAFT-stamped until ratified) · keel.lock/manifest
 `substrate.rerank {file, port: 8091}`. Zero contract/golden edits. **ISSUE-11 filed.** **Then the
-whole harness was SMOKED LIVE (DRAFT, $0)** — see the last WORKLOG entry; step-0 retired; the
-recall@5-saturation finding drives a v2 hardening pass before ratification.
+whole harness was SMOKED LIVE (DRAFT, $0)** — step-0 retired; the recall@5-saturation finding
+surfaced — **and the v2 hardening pass ran to convergence the same day (operator go)**: see the
+last two WORKLOG entries.
 
 ## Session-specific state the standing docs don't carry
 
-- **C1/C2 sequence now: v2 hardening → ratification → live run.** The DRAFT smoke proved the
-  harness end-to-end AND showed identity recall@5 saturates (0.975) — C1's golden-named measure
-  (recall@5 uplift ≥ 0.10) has no headroom on the draft set. **Next session (or on the operator's
-  word): author the v2 hardened corpus** (proposal §7 Remedy A — grow ~2–3× with near-topic
-  confusables; engineer identity recall@5 into ~0.6–0.8 using the per-query data in
-  `.keelstate/bench/recall-qwen3-embedding-0.6b-q8-identity.json` as the feedback loop). Then the
-  operator ratifies v2 (flip `ratified:true`; content edits can't break CI — the lint is
-  structure-only) + provisions `all-MiniLM-L6-v2` GGUF (~25–45 MB) for the C2 leg.
+- **v2 hardening is DONE + measured (operator-granted same day).** 108 docs / 41 queries; identity
+  baseline **0.786 (in the 0.6–0.8 window**, traps 0.611); draft rerank uplift **+0.070 recall@5 /
+  +0.111 nDCG@10** at p95 676 ms, six queries recovered, zero regressions. Artifacts:
+  `.keelstate/bench/recall-qwen3-embedding-0.6b-q8-{identity,rerank}.json` (now carry per-query
+  `top_ids` — the ranking evidence for ratification review).
+- **C1/C2 is now PURELY operator-gated (ISSUE-11):** (1) ratify
+  `tests/recall/golden-recall.json` v2 — **including the C1 threshold policy call** (proposal §8:
+  at 0.10 the draft evidence decides OFF (+0.070 short) despite +0.111 nDCG; at 0.05 it decides
+  ON; the agent deliberately did not pre-pick). Content edits can't break CI (structure-only
+  lint). (2) provision `all-MiniLM-L6-v2` GGUF (~25–45 MB) into `C:\models` for C2. Then the
+  decision run is 3 bounded commands: `keel recall-bench` → `--rerank --baseline <id-artifact>` →
+  (MiniLM on :8090) `--embed-model all-minilm-l6-v2 --baseline <id-artifact>`. Decisions →
+  WORKLOG + keel.lock flips; C1-ON additionally pulls Ring-4 rerank wiring + lifecycle
+  rerank-launch (deliberately unbuilt until earned).
 - **Step-0 is RETIRED:** `qwen3-reranker-0.6b-q8_0.gguf` loads under `--reranking` (up in 6 s) and
-  `/v1/rerank` scores correctly (0.9975 vs 1.3e-05). Draft rerank leg: nDCG +0.061 / MRR +0.040 /
-  recall@5 +0.025 at p95 551 ms (≤ the 1500 ms budget) — improves every family. The C1 live run is
-  3 commands once v2 is ratified: `keel recall-bench` → `--rerank --baseline <id-artifact>` →
-  (MiniLM on :8090) `--embed-model all-minilm-l6-v2 --baseline <id-artifact>`. Decisions → WORKLOG
-  + keel.lock flips; C1-ON additionally pulls Ring-4 rerank wiring + lifecycle rerank-launch
-  (deliberately unbuilt until earned).
+  `/v1/rerank` scores correctly. Launch pattern for the rerank leg:
+  `llama-server --reranking -m C:\models\qwen3-reranker-0.6b-q8_0.gguf --port 8091` (ISSUE-8:
+  file-redirect, bounded, kill after).
 - **Negative-control floor data (recorded, no change made):** top-1 cosines 0.689/0.528/0.443 on
   no-answer queries — the live `cos <= 0` Ring-4 floor would inject all three; a future floor sits
   ~0.7 on this embedder or stays score-relative.
@@ -53,8 +57,8 @@ recall@5-saturation finding drives a v2 hardening pass before ratification.
 
 ## The queue (ROADMAP order; first unblocked `[ ]`/`[?]` wins)
 
-1. **C1/C2 v2 set hardening** (agent-doable now) → then ISSUE-11 ratification (operator) → the
-   live run. If gated at the ratification step, route around:
+1. **C1/C2 decision run** — gated on ISSUE-11 (operator: ratify v2 + threshold call + MiniLM).
+   Everything agent-side is done. If gated, route around:
 2. **B1 — `svc::amplify`** built clamped-OFF + the ISSUE-4 best-of-N benchmark → decide ON/OFF.
    (Model-free structure is buildable now; the benchmark is a live session.)
 3. **B3/ISSUE-5 — flywheel ignition:** out-of-band LoRA (Unsloth) over the exported corpus;

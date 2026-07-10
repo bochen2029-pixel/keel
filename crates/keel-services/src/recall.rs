@@ -277,6 +277,10 @@ pub struct QueryOutcome {
     pub mrr: Option<f32>,
     pub top1_id: Option<String>,
     pub top1_cosine: Option<f32>,
+    /// The final ranking's top `ndcg_k` ids (post-rerank when a reranker rode the funnel) — the
+    /// set-authoring/ratification feedback loop: which docs outrank the labeled ones, per query.
+    #[serde(default)]
+    pub top_ids: Vec<String>,
 }
 
 /// Mean metrics over the scored (non-negative) queries of one family (or overall).
@@ -376,6 +380,7 @@ pub async fn run_recall_bench(
             None => scored.iter().map(|(id, _)| id.clone()).collect(),
         };
         let top1 = scored.first().cloned();
+        let top_ids: Vec<String> = ranked.iter().take(cfg.ndcg_k).cloned().collect();
         if q.relevant.is_empty() {
             if let Some((_, s)) = &top1 {
                 negative_top1.push(*s);
@@ -388,6 +393,7 @@ pub async fn run_recall_bench(
                 mrr: None,
                 top1_id: top1.as_ref().map(|(id, _)| id.clone()),
                 top1_cosine: top1.as_ref().map(|(_, s)| *s),
+                top_ids,
             });
         } else {
             outcomes.push(QueryOutcome {
@@ -398,6 +404,7 @@ pub async fn run_recall_bench(
                 mrr: Some(mrr(&ranked, &q.relevant)),
                 top1_id: top1.as_ref().map(|(id, _)| id.clone()),
                 top1_cosine: top1.as_ref().map(|(_, s)| *s),
+                top_ids,
             });
         }
     }
@@ -631,6 +638,7 @@ mod tests {
         let q_a = base.queries.iter().find(|o| o.id == "q_a").unwrap();
         assert_eq!(q_a.recall_at_k, Some(1.0));
         assert_eq!(q_a.top1_id.as_deref(), Some("d_a"));
+        assert_eq!(q_a.top_ids.first().map(String::as_str), Some("d_a"), "the final ranking is recorded");
         let q_n = base.queries.iter().find(|o| o.id == "q_n").unwrap();
         assert_eq!(q_n.recall_at_k, None, "a negative control has no recall");
         assert_eq!(base.negative_top1_cosine.len(), 1, "its cosine top-1 is floor-calibration data");
