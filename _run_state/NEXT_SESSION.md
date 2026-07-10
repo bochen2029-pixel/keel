@@ -56,13 +56,15 @@ is real in `kernel::engine` behind `router.amplify_n: 1`) · **(5)** **D2 SEXTAN
    sessions build it on the operator's ask, not as KEEL falsifier work. **Operator: author the
    real Canon** (`C:\SEXTANT\canon\profile.json` + `cv.md`) and re-run
    `python -m sextant batch postings --limit 5` — the machinery is deterministic.
-2. **B3/ISSUE-5 — flywheel ignition:** out-of-band LoRA (Unsloth) over the exported corpus;
-   measure the `escalation_rate` trend (flat is an acceptable *decided* outcome).
+2. **B3 is DECIDED** (base case holds flat-at-zero over 73 lifetime turns; ignition deferred on
+   evidence; ISSUE-5 resolved; C4 closed on the same data at 0.014). Pre-registered triggers +
+   the turnkey pipeline: `docs/flywheel-ignition.md`; the standing watch rides `keel metrics`.
 3. **A5 — privacy rung-3** (`ort`/ONNX) — operator's explicit LAST. Then **C3**.
-4. **E2 — the DONE review** — scorecard: C1 ✓ C2 ✓ B1 ✓ **D2 ✓ (verdict PASS)** · C4/C5
-   prelim-passed · C3 pending A5 · B3 pending the LoRA run · **D3/ToolHost lands at SEXTANT S4**
-   (decided — `.eml` staging until then; vet `rmcp` there; product work, not a DONE blocker per
-   §3 "D2 or at least D1").
+4. **E2 — the DONE review** — scorecard: **C1 ✓ C2 ✓ C4 ✓ B1 ✓ B3 ✓ D1 ✓ D2 ✓** (every one
+   measured + decided, pre-registered) · C5 prelim-KEEL-favorable (re-confirm at E2 with the
+   73-turn data) · C3 pending A5 · ISSUE-6 pins (operator) · **D3/ToolHost = SEXTANT S4 product
+   work, not a DONE blocker** (§3 "D2 or at least D1" — both stand). E2 = the completion account
+   + the §4.2 invariant scorecard + the keel.lock stage flip + `.keelstate/DONE`.
 
 **Operator-only ISSUES open:** ISSUE-6 (`sha256:` pins → then `kernel::lock` verify) · the Fable-5
 v0.3.0 hindsight ruling (piecemeal, non-blocking) · autonomy re-grant (sessions run SUPERVISED
