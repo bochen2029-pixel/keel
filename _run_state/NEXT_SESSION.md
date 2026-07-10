@@ -1,79 +1,58 @@
 # NEXT SESSION — handoff brief (written 2026-07-10, session end)
 
-> **How to use:** read this FIRST, then run the ⛑ reconstitution protocol in `_run_state/STATE.md`
-> (canon + CLAUDE.md + ROADMAP + the last FOUR WORKLOG entries — 2026-07-10 was a four-slice day).
-> This file carries only the deltas the standing docs don't; on any conflict, trust git + the gate
-> over this snapshot. Supersede or delete this file at the next session's end.
+> **How to use:** read this FIRST, then the ⛑ protocol in `_run_state/STATE.md`. On any conflict,
+> trust git + the gate over this snapshot. Supersede at the next session's end.
 
-## Where 2026-07-10 ended (verify, never recall)
+## THE HEADLINE: E2 PASSED — KEEL IS DONE (2026-07-10). The loop is in PERPETUAL-POLISH MODE.
 
-`git -C C:\KEEL log --oneline -6` → HEAD = the B1-decision commit, pushed, tree clean.
-`cargo test` (PowerShell, from `C:\KEEL`) → **178 passed / 7 ignored / 0 failed**, clippy
-**0 warnings whole-tree**, seal `db4377b3` green.
+`git -C C:\KEEL log --oneline -3` → HEAD = the E2 commit (`601f967`), pushed, tree clean.
+`cargo test` → **178/7/0**, clippy **0 warnings**, seal `db4377b3` green. `.keelstate/DONE`
+exists. keel.lock `stage: stage3`. **The completion account: `docs/DONE-REVIEW.md`** — read it
+before any polish work; it is the ground truth for what DONE means and what was excluded.
 
-Five slices in one day: **(1)** C1/C2 design + harness (`73430c7` + smoke `cdca9e6`) · **(2)**
-golden-recall **v2 hardening** measured to convergence (`f2c1dd3`) · **(3)** set **RATIFIED** +
-MiniLM provisioned + the decision legs → **C1 OFF · C2 floor-default (falsifier trip!) + the flip
-lived** (`76845dd`, ISSUE-11 resolved) · **(4)** **B1 amplify BUILT clamped-OFF + DECIDED OFF**
-(`72a74ef`, ISSUE-4 resolved: uplift +0.115 < the pre-registered 0.15 bar; the §8 `amplify?` loop
-is real in `kernel::engine` behind `router.amplify_n: 1`) · **(5)** **D2 SEXTANT SCOPED + SEEDED**
-(the D1 pattern: boundary map `docs/proposals/sextant-on-keel.md`; repo `C:\SEXTANT` git-init'd
-`ea5b9ed`, LOCAL-ONLY; D3/ToolHost timing decided = S4; S0 keystone is the next build).
+Nine slices landed 2026-07-10 (the WORKLOG's nine same-day entries): C1/C2 designed → hardened →
+ratified → **decided** (reranker OFF; the embedder FLOOR took the default — flip lived) · **B1**
+amplify built clamped-OFF + **decided OFF** · **D2 SEXTANT** scoped → S0 → S1 → **boundary
+verdict PASS** (cell `df7c7c5`, local-only) · **B3 decided** (base case holds; ignition
+deferred-with-triggers) + **C4/C5 closed** · **E2 passed**.
 
-## Session-specific state the standing docs don't carry
+## Perpetual-polish mode (ROADMAP §4) — the standing loop now
 
-- **The embed substrate CHANGED:** the genome default embedder is now **all-MiniLM-L6-v2 f16
-  (384-dim, `pooling: mean`)** on `:8090`; Qwen3-Embedding-0.6B stays on disk as the lock
-  `fallback`. The Ring-4 sidecars were auto-rebuilt under the new fingerprint
-  (`all-minilm-l6-v2:384`, 30 vecs, verified). Any stale Qwen3 embed server must NOT be revived on
-  :8090 — the new **dim-guard** drops wrong-dim vectors loudly if one is.
-- **C1/C2 decision record:** proposal §9 (`docs/proposals/golden-recall-set.md`) + keel.lock
-  annotations + the 2026-07-10 WORKLOG entries. Re-open triggers recorded there (C1: organic
-  recall misses / k=1; C2: Qwen3 instruct-prefix experiment / symmetric-hardening pass). Decision
-  artifacts: `.keelstate/bench/recall-*.json` (per-query `top_ids` included).
-- **Standing local procs** (all self-reviving): llama-server `:8080` (`--jinja`) · embed server
-  `:8090` (**MiniLM now**) · `keel-serve` `:7070` (restarted on the final build, keys injected).
-  The llama-servers get **reaped when their spawning tool-shell tears down** (observed twice
-  2026-07-10) — not a defect; any `keel` call re-resolves the whole substrate. Rerank/MiniLM bench
-  servers (:8091/:8092) were killed after their legs. **Two tooling rules:** stop `keel-serve`
-  before any `cargo build/test` that relinks the `keel` crate (sibling-bin lock → os error 5), and
-  **`cargo test` does NOT relink `target\debug\*.exe`** — run `cargo build -p keel` before
-  executing a just-edited bin (a stale bin routes the subcommand as a plain prompt → junk Tape turn).
-- **`git stash@{0}`** = the June-17 anomaly (forensics only — never pop casually).
-- **The `nul` junk file** reappears after cargo runs; `cmd /c del "\\?\C:\KEEL\nul"` (a
-  path-protection hook may block it — then just leave it; it's untracked and unstaged).
-- **NightScribe repo** (`C:\ClaudeCode\photo2deck`) is still LOCAL-ONLY (no remote).
-- **SEXTANT repo** (`C:\SEXTANT`, `ea5b9ed`) is LOCAL-ONLY (no remote — operator adds one if
-  wanted; the gitignore keeps Canon/PII out regardless).
-- **A7 honest residual** (unchanged): cold-eyes single-judge recall on adversarial plants is
-  stochastic on the 9B; 2-of-3 vote in place; upgrade trigger = a stronger local judge.
+- **Polish item #1 (operator-gated): A5 privacy rung-3 + the C3 falsifier** (`ort`/ONNX, the
+  OpenAI privacy filter at `C:\models\privacy-filter`; ISSUE-2). Build behind `GOLDEN_PRIVACY`,
+  pre-register the C3 thresholds BEFORE measuring (the house template), additive-recall-only
+  (rungs 1–2 keep the guarantee).
+- Then, in any order, each a gated/banked/pushed slice: `/code-review` the tree → fix findings ·
+  raise thin coverage · **falsifier re-checks with fresh data** (standing watches: `keel metrics`
+  escalation "does not rise" + rework < 0.10; the flywheel triggers in
+  `docs/flywheel-ignition.md`; C1's re-open = organic recall misses) · doc reconciles ·
+  a completeness-critic sweep every ~10 slices.
+- **SEXTANT S2–S4** (discovery breadth · conductor · dispatch → **D3/ToolHost lands at S4**, vet
+  `rmcp` there) = cell product work on the operator's ask. **Operator: author the real Canon**
+  (`C:\SEXTANT\canon\profile.json` + `cv.md`) and re-run
+  `python -m sextant batch postings --limit 5`.
 
-## The queue (ROADMAP order; first unblocked `[ ]`/`[?]` wins)
+**Operator-only, open:** ISSUE-6 `sha256:` pins (→ then the `kernel::lock` verify slice) · the
+Fable-5 v0.3.0 hindsight ruling (piecemeal) · autonomy re-grant (sessions run SUPERVISED).
 
-1. **D2 is DONE — VERDICT: PASS** (S0+S1 lived on real postings, cell `df7c7c5`, 20 tests; zero
-   KEEL-side changes of any kind; two cells now stand on KEEL). SEXTANT continues as PRODUCT work
-   (S2 discovery breadth/research · S3 conductor · S4 dispatch → **D3/ToolHost lands there**) —
-   sessions build it on the operator's ask, not as KEEL falsifier work. **Operator: author the
-   real Canon** (`C:\SEXTANT\canon\profile.json` + `cv.md`) and re-run
-   `python -m sextant batch postings --limit 5` — the machinery is deterministic.
-2. **B3 is DECIDED** (base case holds flat-at-zero over 73 lifetime turns; ignition deferred on
-   evidence; ISSUE-5 resolved; C4 closed on the same data at 0.014). Pre-registered triggers +
-   the turnkey pipeline: `docs/flywheel-ignition.md`; the standing watch rides `keel metrics`.
-3. **A5 — privacy rung-3** (`ort`/ONNX) — operator's explicit LAST. Then **C3**.
-4. **E2 — the DONE review** — scorecard: **C1 ✓ C2 ✓ C4 ✓ B1 ✓ B3 ✓ D1 ✓ D2 ✓** (every one
-   measured + decided, pre-registered) · C5 prelim-KEEL-favorable (re-confirm at E2 with the
-   73-turn data) · C3 pending A5 · ISSUE-6 pins (operator) · **D3/ToolHost = SEXTANT S4 product
-   work, not a DONE blocker** (§3 "D2 or at least D1" — both stand). E2 = the completion account
-   + the §4.2 invariant scorecard + the keel.lock stage flip + `.keelstate/DONE`.
+## Standing state (the deltas)
 
-**Operator-only ISSUES open:** ISSUE-6 (`sha256:` pins → then `kernel::lock` verify) · the Fable-5
-v0.3.0 hindsight ruling (piecemeal, non-blocking) · autonomy re-grant (sessions run SUPERVISED
-until re-granted).
+- **Procs** (self-reviving; any keel call re-resolves): llama-server `:8080` (`--jinja`) · embed
+  `:8090` (**MiniLM/384/mean since the C2 flip**) · keel-serve `:7070`. Bench servers get
+  launched/killed per run (ISSUE-8 pattern: file-redirect + WaitForExit + Kill, never `|
+  Out-String`).
+- **Tooling rules (lived):** PowerShell tool for cargo/git · stop keel-serve before builds that
+  relink the `keel` crate (sibling-bin lock) · **`cargo test` does NOT relink
+  `target\debug\*.exe`** — `cargo build -p keel` before running a just-edited bin · the `nul`
+  junk file reappears after cargo runs (a hook may block deleting it; it's untracked — leave it).
+- **Repos:** KEEL public (pushed) · SEXTANT `C:\SEXTANT` local-only · NightScribe
+  `C:\ClaudeCode\photo2deck` local-only. `git stash@{0}` in KEEL = June-17 forensics (never pop).
+- **Honest residuals on record:** A7 judge stochasticity (2-of-3 vote in; upgrade = stronger
+  local judge) · SEXTANT rung-3 bare-0/1 noise (S2 item) · ISSUE-8 root-fix nice-to-have ·
+  Ring-4 relevance floor tuning data in the bench artifacts (cos ≤ 0 floor stands until evidence).
 
 ## Disciplines (unchanged, load-bearing)
 
 Contracts + goldens frozen (agent read-only; seal `db4377b3`). Layer rule. Zero-contract-edit bar
-for cells. Pre-register thresholds before measuring (the C1/C2 template). TTL every live run
-(file-redirect + `Start-Process`/`WaitForExit`/`Kill`, never `| Out-String`); verify by artifact.
-Use the **PowerShell tool** for cargo/git (never git-bash). One gated commit per slice, push.
-Decide-and-document; operator-only acts go to the ISSUES register.
+for cells. **Pre-register thresholds before measuring.** TTL every live run; verify by artifact.
+One gated commit per slice, push. Decide-and-document; operator-only acts go to ISSUES.
